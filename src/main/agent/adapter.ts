@@ -38,7 +38,7 @@ export type AdapterEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; invocation: ToolInvocation }
   | { type: "finish"; stopReason: "tool-use" | "end-turn" | "error"; errorMessage?: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number };
+  | { type: "usage"; inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 
 // ---------- History entry shapes the adapter consumes ----------
 

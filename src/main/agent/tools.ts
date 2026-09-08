@@ -9,6 +9,17 @@ import {
   writeTextFile,
 } from "../core/workspace-bridge";
 import { runGuardedCommand } from "../core/command";
+import { snapshotBefore } from "../diffs";
+import { app } from "electron";
+
+/**
+ * Save a file's current content so diff/revert works, whatever happens after.
+ * snapshotBefore handles both cases itself: existing files get their content
+ * stored, missing ones get an empty snapshot (the "new file" diff badge).
+ */
+async function snapshotBeforeEdit(_workspace: string, relPath: string): Promise<void> {
+  await snapshotBefore(app.getPath("userData"), relPath);
+}
 
 /**
  * The agent's hands, now backed by the CLI core's workspace boundary: every
@@ -129,10 +140,12 @@ export async function executeTool(name: string, argsJson: string, workspace: str
         return cap(header + result.content);
       }
       case "write_file": {
+        await snapshotBeforeEdit(workspace, String(args.path ?? ""));
         const result = await writeTextFile(workspace, String(args.path ?? ""), String(args.content ?? ""));
         return `Wrote ${result.path} (${result.bytesWritten} bytes).`;
       }
       case "edit_file": {
+        await snapshotBeforeEdit(workspace, String(args.path ?? ""));
         const result = await editTextFile(
           workspace,
           String(args.path ?? ""),

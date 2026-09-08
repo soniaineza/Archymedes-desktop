@@ -109,6 +109,9 @@ class AnthropicAdapter implements AgentAdapter {
       type: "usage",
       inputTokens: finalMessage.usage.input_tokens,
       outputTokens: finalMessage.usage.output_tokens,
+      // Cache reads are what make a long agent session affordable; the CLI's
+      // accounting folds them in so the cost display reflects reality.
+      cachedInputTokens: finalMessage.usage.cache_read_input_tokens ?? 0,
     });
 
     const usedTools = finalMessage.content.some((b) => b.type === "tool_use");
@@ -201,7 +204,7 @@ class OpenAICompatAdapter implements AgentAdapter {
       number,
       { id: string; name: string; args: string }
     >();
-    let usageTokens = { input: 0, output: 0 };
+    let usageTokens = { input: 0, output: 0, cached: 0 };
     let finished = false;
 
     for await (const chunk of stream) {
@@ -231,6 +234,7 @@ class OpenAICompatAdapter implements AgentAdapter {
         usageTokens = {
           input: chunk.usage.prompt_tokens ?? 0,
           output: chunk.usage.completion_tokens ?? 0,
+          cached: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0,
         };
       }
     }
@@ -252,6 +256,7 @@ class OpenAICompatAdapter implements AgentAdapter {
         type: "usage",
         inputTokens: usageTokens.input,
         outputTokens: usageTokens.output,
+        cachedInputTokens: usageTokens.cached,
       });
     }
 

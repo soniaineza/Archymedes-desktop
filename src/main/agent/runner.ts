@@ -137,9 +137,14 @@ export class AgentRunner {
                 // Price with the catalog (cached-input aware), not flat rates.
                 totals.input += event.inputTokens;
                 totals.output += event.outputTokens;
+                totals.cached += event.cachedInputTokens ?? 0;
                 if (prices) {
                   const turnCost = priceUsage(
-                    { inputTokens: event.inputTokens, outputTokens: event.outputTokens },
+                    {
+                      inputTokens: event.inputTokens,
+                      outputTokens: event.outputTokens,
+                      cachedInputTokens: event.cachedInputTokens,
+                    },
                     prices,
                   );
                   totals.cost = addMoney(totals.cost, turnCost);
