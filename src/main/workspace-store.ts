@@ -53,8 +53,46 @@ export function resolveInWorkspace(relPath: string): string {
   return abs;
 }
 
-export async function listDirTree(relPath = ""): Promise<FileNode[]> {
+/**
+ * Same as resolveInWorkspace, but also follows the path's symlink chain (for
+ * the parts that exist) and refuses to return anywhere outside the workspace
+ * root — a lexical check alone would let a symlink inside the tree point
+ * somewhere else entirely and still pass.
+ */
+export async function resolveInWorkspaceSafe(relPath: string): Promise<string> {
   const abs = resolveInWorkspace(relPath);
+  const normalizedRoot = path.resolve(workspacePath!);
+  try {
+    const real = await fs.realpath(abs);
+    if (real !== normalizedRoot && !real.startsWith(normalizedRoot + path.sep)) {
+      throw new Error(`Path escapes workspace through a symlink: ${relPath}`);
+    }
+    return real;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // Doesn't exist yet (e.g. a new file about to be written): check the
+    // nearest existing ancestor's real path instead.
+    let dir = path.dirname(abs);
+    while (true) {
+      try {
+        const real = await fs.realpath(dir);
+        if (real !== normalizedRoot && !real.startsWith(normalizedRoot + path.sep)) {
+          throw new Error(`Path escapes workspace through a symlink: ${relPath}`);
+        }
+        break;
+      } catch (dirError) {
+        if ((dirError as NodeJS.ErrnoException).code !== "ENOENT") throw dirError;
+        const parent = path.dirname(dir);
+        if (parent === dir) break; // reached filesystem root without finding an existing ancestor
+        dir = parent;
+      }
+    }
+    return abs;
+  }
+}
+
+export async function listDirTree(relPath = ""): Promise<FileNode[]> {
+  const abs = await resolveInWorkspaceSafe(relPath);
   const entries = await fs.readdir(abs, { withFileTypes: true });
   const nodes: FileNode[] = [];
 
@@ -82,7 +120,7 @@ export async function listDirTree(relPath = ""): Promise<FileNode[]> {
 }
 
 export async function readFileEntry(relPath: string) {
-  const abs = resolveInWorkspace(relPath);
+  const abs = await resolveInWorkspaceSafe(relPath);
   const stat = await fs.stat(abs);
   if (stat.size > MAX_FILE_BYTES) {
     const handle = await fs.open(abs, "r");
@@ -99,7 +137,7 @@ export async function readFileEntry(relPath: string) {
 }
 
 export async function writeFileEntry(relPath: string, content: string): Promise<void> {
-  const abs = resolveInWorkspace(relPath);
+  const abs = await resolveInWorkspaceSafe(relPath);
   await fs.mkdir(path.dirname(abs), { recursive: true });
   await fs.writeFile(abs, content, "utf8");
 }

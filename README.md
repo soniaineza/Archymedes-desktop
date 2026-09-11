@@ -37,6 +37,20 @@ npm run dev
 2. **Settings** → choose a provider, paste your API key (stored locally)
 3. **Ask** — e.g. *“explain this project”*, *“fix the failing test in @src”*
 
+## Development
+
+```bash
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint
+npm test            # vitest — the workspace boundary, command policy,
+                     # pricing/capability tables, and diff engine all have
+                     # unit coverage
+npm run format       # prettier --write
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, and a production
+build on every push and pull request against `main`.
+
 ## Package a release
 
 ```bash

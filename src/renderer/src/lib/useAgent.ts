@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent, AgentStatus, ChatMessage, SessionData, SessionSummary, ToolCallInfo } from "@shared/types";
 
 /**
@@ -137,18 +137,28 @@ export function useAgent() {
     }
   }, [handleEvent]);
 
-  // Autosave after streams settle.
+  // Autosave and queue-drain run once per busy→idle transition. This has to
+  // live in an effect, not in the render body: render must stay a pure
+  // computation of props/state, and scheduling a save or a queued send is a
+  // real side effect — doing it inline risks firing twice (React may render
+  // a component more than once for one commit) or firing for a render that
+  // never commits.
   const lastStatusRef = useRef<AgentStatus>("idle");
-  if (lastStatusRef.current !== "idle" && status === "idle" && dirtyRef.current) {
-    dirtyRef.current = false;
-    void persist({ ...sessionRef.current, updatedAt: Date.now() });
-  }
-  if (lastStatusRef.current !== "idle" && status === "idle" && queueRef.current.length > 0) {
-    const next = queueRef.current[0];
-    setQueue(queueRef.current.slice(1));
-    if (next) setTimeout(() => sendRef.current?.(next), 50);
-  }
-  lastStatusRef.current = status;
+  useEffect(() => {
+    const wasBusy = lastStatusRef.current !== "idle";
+    lastStatusRef.current = status;
+    if (!wasBusy || status !== "idle") return;
+
+    if (dirtyRef.current) {
+      dirtyRef.current = false;
+      void persist({ ...sessionRef.current, updatedAt: Date.now() });
+    }
+    if (queueRef.current.length > 0) {
+      const next = queueRef.current[0];
+      setQueue(queueRef.current.slice(1));
+      if (next) setTimeout(() => sendRef.current?.(next), 50);
+    }
+  }, [status, persist]);
 
   const dispatch = useCallback(async (data: SessionData) => {
     await window.archymedes.sendAgentMessage(data.messages, data.id).catch((err: unknown) => {

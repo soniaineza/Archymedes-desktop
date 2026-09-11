@@ -68,6 +68,7 @@ export async function loadSession(userDataPath: string, id: string): Promise<Sto
 }
 
 export async function saveSession(userDataPath: string, session: StoredSession): Promise<void> {
+  if (!/^[\w-]+$/.test(session.id)) throw new Error(`Invalid session id: ${session.id}`);
   const dir = sessionsDir(userDataPath);
   await ensureDir(dir);
   const file = path.join(dir, `${session.id}.json`);

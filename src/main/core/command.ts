@@ -165,7 +165,12 @@ export const runLocalCommand: CommandRunner = async (command, options) => {
     let settled = false;
     let forcedExitCode: number | null = null;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeout: ReturnType<typeof setTimeout> = setTimeout(() => {
+      if (settled) return;
+      forcedExitCode = 124;
+      stderr += `\nCommand exceeded ${options.timeoutMs}ms and was killed.`;
+      terminate();
+    }, options.timeoutMs);
     let abort = () => {};
     let closedCode: number | null | undefined;
     let stdoutEnded = false;
@@ -227,13 +232,6 @@ export const runLocalCommand: CommandRunner = async (command, options) => {
     };
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) abort();
-
-    timeout = setTimeout(() => {
-      if (settled) return;
-      forcedExitCode = 124;
-      stderr += `\nCommand exceeded ${options.timeoutMs}ms and was killed.`;
-      terminate();
-    }, options.timeoutMs);
   });
 };
 
