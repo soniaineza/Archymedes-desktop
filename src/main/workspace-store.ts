@@ -61,7 +61,8 @@ export function resolveInWorkspace(relPath: string): string {
  */
 export async function resolveInWorkspaceSafe(relPath: string): Promise<string> {
   const abs = resolveInWorkspace(relPath);
-  const normalizedRoot = path.resolve(workspacePath!);
+  // The root itself may sit behind a symlink; compare real paths to real paths.
+  const normalizedRoot = await fs.realpath(path.resolve(workspacePath!));
   try {
     const real = await fs.realpath(abs);
     if (real !== normalizedRoot && !real.startsWith(normalizedRoot + path.sep)) {

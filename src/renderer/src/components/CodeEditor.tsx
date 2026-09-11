@@ -1,7 +1,11 @@
 import { useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { OpenTab } from "../lib/tabs";
 import { fileName, isDirty } from "../lib/tabs";
+import { fileKind } from "../lib/files";
 import { highlightCode } from "./Highlight";
+import { Icon } from "./Icon";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface Props {
   tabs: OpenTab[];
@@ -24,8 +28,11 @@ function langOf(path: string): string {
   return map[ext] ?? "text";
 }
 
+type Transform = (value: string, selStart: number, selEnd: number) => { value: string; selStart: number; selEnd: number };
+
 export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, onSave, onChange }: Props) {
-  const active = tabs.find((t) => t.path === activeTab) ?? null;
+  const { t, shortcut } = useI18n();
+  const active = tabs.find((tab) => tab.path === activeTab) ?? null;
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLDivElement | null>(null);
@@ -34,8 +41,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
   const updateCursor = () => {
     const el = taRef.current;
     if (!el) return;
-    const upTo = el.value.slice(0, el.selectionStart);
-    const lines = upTo.split("\n");
+    const lines = el.value.slice(0, el.selectionStart).split("\n");
     setCursor({ line: lines.length, col: (lines[lines.length - 1]?.length ?? 0) + 1 });
   };
 
@@ -49,8 +55,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
     }
   };
 
-  /** Wrap a selection transform on the textarea content. */
-  const transform = (fn: (value: string, selStart: number, selEnd: number) => { value: string; selStart: number; selEnd: number }) => {
+  const transform = (fn: Transform) => {
     const el = taRef.current;
     if (!el || !active) return;
     const res = fn(el.value, el.selectionStart, el.selectionEnd);
@@ -61,7 +66,8 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
     }, 0);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return;
     const el = e.currentTarget;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
       e.preventDefault();
@@ -77,9 +83,9 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
         transform((value, s, selEnd) => {
           const lineStart = value.lastIndexOf("\n", s - 1) + 1;
           const lineEnd = value.indexOf("\n", selEnd) === -1 ? value.length : value.indexOf("\n", selEnd);
-          const block = value.slice(lineStart, lineEnd);
-          const lines = block.split("\n");
-          const next = lines
+          const next = value
+            .slice(lineStart, lineEnd)
+            .split("\n")
             .map((l) => (e.shiftKey ? l.replace(/^ {1,2}|^\t/, "") : indent + l))
             .join("\n");
           return { value: value.slice(0, lineStart) + next + value.slice(lineEnd), selStart: lineStart, selEnd: lineStart + next.length };
@@ -100,13 +106,10 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
       transform((value, s, selEnd) => {
         const lineStart = value.lastIndexOf("\n", s - 1) + 1;
         const currentLine = value.slice(lineStart, s);
-        const indent = (/^[ \t]*/.exec(currentLine)?.[0]) ?? "";
+        const indent = /^[ \t]*/.exec(currentLine)?.[0] ?? "";
         const opensBlock = /[{[(:]\s*$/.test(currentLine);
-        const extra = opensBlock ? "  " : "";
-        const insert = "\n" + indent + extra;
-        // close the block on the next line if the user just opened it
-        const nextChar = value[selEnd] ?? "";
-        const closes = opensBlock && "})]".includes(nextChar);
+        const insert = "\n" + indent + (opensBlock ? "  " : "");
+        const closes = opensBlock && "})]".includes(value[selEnd] ?? "");
         const out = value.slice(0, s) + insert + (closes ? "\n" + indent : "") + value.slice(selEnd);
         const caret = s + insert.length;
         return { value: out, selStart: caret, selEnd: caret };
@@ -120,8 +123,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
       transform((value, s, selEnd) => {
         const lineStart = value.lastIndexOf("\n", s - 1) + 1;
         const lineEnd = value.indexOf("\n", selEnd) === -1 ? value.length : value.indexOf("\n", selEnd);
-        const block = value.slice(lineStart, lineEnd);
-        const lines = block.split("\n");
+        const lines = value.slice(lineStart, lineEnd).split("\n");
         const allCommented = lines.every((l) => l.trim().length === 0 || l.trimStart().startsWith("//"));
         const next = lines
           .map((l) => (allCommented ? l.replace(/^(\s*)\/\/ ?/, "$1") : l.trim().length ? l.replace(/^(\s*)/, "$1// ") : l))
@@ -144,7 +146,6 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
         const prevStart = value.lastIndexOf("\n", lineStart - 2) + 1;
         return { value: value.slice(0, prevStart) + line + value.slice(prevStart, lineEnd) + value.slice(lineEnd), selStart: s, selEnd: s };
       });
-      return;
     }
   };
 
@@ -152,33 +153,48 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
   const lang = active ? langOf(active.path) : "text";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div className="tabs">
-        {tabs.map((tab) => (
-          <div
-            key={tab.path}
-            className={`tab${tab.path === activeTab ? " active" : ""}`}
-            onClick={() => onActivate(tab.path)}
-          >
-            <span>{fileName(tab.path)}</span>
-            {isDirty(tab) && <span className="dirty-dot">●</span>}
-            <button
-              className="close"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(tab.path);
-              }}
-              title="Close tab"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-      </div>
+    <div className="editor">
+      {tabs.length > 0 && (
+        <div className="tabs" role="tablist">
+          {tabs.map((tab) => {
+            const selected = tab.path === activeTab;
+            return (
+              <div
+                key={tab.path}
+                role="tab"
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                className={`tab${selected ? " active" : ""}`}
+                onClick={() => onActivate(tab.path)}
+                onAuxClick={(e) => {
+                  if (e.button === 1) onClose(tab.path);
+                }}
+                title={tab.path}
+              >
+                <Icon name="file" size={13} className={`tree-icon kind-${fileKind(tab.path)}`} />
+                <bdi className="tab-name">{fileName(tab.path)}</bdi>
+                {isDirty(tab) && <span className="dirty-dot" aria-label={t("editor.unsaved")} />}
+                <button
+                  className="tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose(tab.path);
+                  }}
+                  title={t("editor.closeTab")}
+                  aria-label={t("editor.closeTab")}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {active ? (
         <>
-          <div className="editor-wrap">
-            <div className="editor-gutter" ref={gutterRef}>
+          <div className="editor-wrap" dir="ltr">
+            <div className="editor-gutter" ref={gutterRef} aria-hidden>
               {Array.from({ length: lineCount }, (_, i) => (
                 <div key={i} className={`ln${cursor.line === i + 1 ? " current" : ""}`}>
                   {i + 1}
@@ -187,7 +203,9 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
             </div>
             <div className="editor-stack">
               <div className="editor-highlight" ref={hlRef} aria-hidden>
-                <pre><code>{highlightCode(active.content, lang)}</code></pre>
+                <pre>
+                  <code>{highlightCode(active.content, lang)}</code>
+                </pre>
               </div>
               <textarea
                 key={`${active.path}:${activeLine ?? 0}`}
@@ -200,7 +218,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
                     el.setSelectionRange(pos, pos);
                   }
                 }}
-                className="editor-textarea transparent"
+                className="editor-textarea"
                 value={active.content}
                 onChange={(e) => {
                   onChange(active.path, e.target.value);
@@ -208,25 +226,42 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
                 }}
                 onKeyDown={handleKeyDown}
                 onKeyUp={updateCursor}
-                onClick={() => { updateCursor(); syncScroll(); }}
+                onClick={() => {
+                  updateCursor();
+                  syncScroll();
+                }}
                 onScroll={syncScroll}
                 spellCheck={false}
+                aria-label={active.path}
               />
             </div>
           </div>
           <div className="editor-status">
-            <span>{active.path}</span>
-            {active.truncated && <span>(truncated — highlighting off)</span>}
-            {isDirty(active) && <span className="dirty">● unsaved</span>}
-            <span className="status-right">{lang} · Ln {cursor.line}, Col {cursor.col} · {lineCount} lines</span>
-            <button onClick={() => onSave(active.path, active.content)} disabled={!isDirty(active)}>
-              Save Ctrl+S
+            <bdi className="editor-path" dir="ltr">
+              {active.path}
+            </bdi>
+            {active.truncated && (
+              <span className="pill warn">
+                <Icon name="alert" size={11} />
+                {t("editor.truncated")}
+              </span>
+            )}
+            {isDirty(active) && <span className="pill">{t("editor.unsaved")}</span>}
+            <span className="spacer" />
+            <span>{lang}</span>
+            <span>{t("editor.position", { line: cursor.line, col: cursor.col })}</span>
+            <span>{t("editor.lines", { count: lineCount })}</span>
+            <button className="btn small" onClick={() => onSave(active.path, active.content)} disabled={!isDirty(active)}>
+              {t("common.save")}
+              <kbd>{shortcut("mod+s")}</kbd>
             </button>
           </div>
         </>
       ) : (
-        <div className="editor-wrap">
-          <div className="editor-empty">Ctrl+P quick open · Ctrl+/ comment · Tab indent · ask the agent on the right</div>
+        <div className="editor-empty">
+          <Icon name="logo" size={44} className="editor-empty-mark" />
+          <div className="editor-empty-title">{t("editor.emptyTitle")}</div>
+          <div className="editor-empty-hint">{t("editor.emptyHint", { shortcut: shortcut("mod+p") })}</div>
         </div>
       )}
     </div>

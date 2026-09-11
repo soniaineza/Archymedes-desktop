@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
-import { getTheme } from "../lib/theme";
-import type { Theme } from "../lib/theme";
+import { getTheme, resolveTheme } from "../lib/theme";
+import type { ResolvedTheme } from "../lib/theme";
+import { Icon } from "./Icon";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface XtermColors {
   background: string;
@@ -12,10 +14,9 @@ interface XtermColors {
   selectionBackground: string;
 }
 
-/** Terminal palettes per app theme. */
-const TERM_COLORS: Record<Theme, XtermColors> = {
-  dark: { background: "#0a0a0a", foreground: "#e8e8e8", cursor: "#ffffff", selectionBackground: "#3a3a3a" },
-  light: { background: "#ffffff", foreground: "#1a1a1a", cursor: "#1a1a1a", selectionBackground: "#c4c4c4" },
+const TERM_COLORS: Record<ResolvedTheme, XtermColors> = {
+  dark: { background: "#0b0b0d", foreground: "#e6e6e9", cursor: "#ffffff", selectionBackground: "#3a3a44" },
+  light: { background: "#ffffff", foreground: "#1c1c21", cursor: "#1c1c21", selectionBackground: "#c9d4e6" },
   "solarized-dark": { background: "#002b36", foreground: "#dcdccc", cursor: "#fdf6e3", selectionBackground: "#1c5a6a" },
   "solarized-light": { background: "#fdf6e3", foreground: "#073642", cursor: "#002b36", selectionBackground: "#c9c0a5" },
   "high-contrast": { background: "#000000", foreground: "#ffffff", cursor: "#ffffff", selectionBackground: "#888888" },
@@ -23,6 +24,9 @@ const TERM_COLORS: Record<Theme, XtermColors> = {
 
 interface Props {
   workspace: string;
+  collapsed: boolean;
+  height: number;
+  onToggleCollapsed: () => void;
   onFileChange: () => void;
 }
 
@@ -33,25 +37,28 @@ interface TermEntry {
   dispose: () => void;
 }
 
-export function TerminalPanel({ workspace, onFileChange }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
+export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed, onFileChange }: Props) {
+  const { t, formatNumber } = useI18n();
   const [tabIds, setTabIds] = useState<number[]>([0]);
   const [activeTab, setActiveTab] = useState(0);
+  const [tick, setTick] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const termsRef = useRef<Map<number, TermEntry>>(new Map());
   const activeRef = useRef(activeTab);
+  const tRef = useRef(t);
   activeRef.current = activeTab;
+  tRef.current = t;
 
-  // Create a terminal entry for the active tab when missing.
+  // Create a terminal for the active tab when it has none yet.
   useEffect(() => {
-    if (collapsed) return;
-    if (termsRef.current.has(activeTab)) return;
+    if (collapsed || termsRef.current.has(activeTab)) return;
 
     const term = new Terminal({
       fontSize: 12.5,
-      fontFamily: '"Cascadia Code", Consolas, monospace',
-      theme: TERM_COLORS[getTheme()],
+      fontFamily: '"Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
+      theme: TERM_COLORS[resolveTheme(getTheme())],
       cursorBlink: true,
+      allowProposedApi: false,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -63,38 +70,27 @@ export function TerminalPanel({ workspace, onFileChange }: Props) {
       fit.fit();
     }
 
-    const entry: TermEntry = {
-      ptyId: null,
-      term,
-      fit,
-      dispose: () => {
-        term.dispose();
-      },
-    };
+    const entry: TermEntry = { ptyId: null, term, fit, dispose: () => term.dispose() };
     termsRef.current.set(activeTab, entry);
-    setTick((t) => t + 1); // re-run the attach effect
+    setTick((n) => n + 1);
 
     let disposed = false;
-
     void window.archymedes.createTerminal().then((info) => {
       if (disposed) return;
       entry.ptyId = info.id;
       window.archymedes.terminalResize(info.id, term.cols, term.rows);
     });
 
-    const offData = window.archymedes.onTerminalData((tid, data) => {
-      if (entry.ptyId && tid === entry.ptyId) term.write(data);
+    const offData = window.archymedes.onTerminalData((id, data) => {
+      if (entry.ptyId && id === entry.ptyId) term.write(data);
     });
-    const offExit = window.archymedes.onTerminalExit((tid) => {
-      if (entry.ptyId && tid === entry.ptyId) {
-        term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
-      }
+    const offExit = window.archymedes.onTerminalExit((id) => {
+      if (entry.ptyId && id === entry.ptyId) term.write(`\r\n\x1b[90m${tRef.current("terminal.exited")}\x1b[0m\r\n`);
     });
     const dataHandler = term.onData((data) => {
-      if (entry.ptyId) {
-        window.archymedes.terminalWrite(entry.ptyId, data);
-        if (data === "\r") setTimeout(onFileChange, 800);
-      }
+      if (!entry.ptyId) return;
+      window.archymedes.terminalWrite(entry.ptyId, data);
+      if (data === "\r") setTimeout(onFileChange, 800);
     });
 
     entry.dispose = () => {
@@ -106,43 +102,40 @@ export function TerminalPanel({ workspace, onFileChange }: Props) {
     };
 
     const onResize = () => {
-      const e = termsRef.current.get(activeRef.current);
-      if (!e) return;
+      const current = termsRef.current.get(activeRef.current);
+      if (!current) return;
       try {
-        e.fit.fit();
-        if (e.ptyId) window.archymedes.terminalResize(e.ptyId, e.term.cols, e.term.rows);
+        current.fit.fit();
+        if (current.ptyId) window.archymedes.terminalResize(current.ptyId, current.term.cols, current.term.rows);
       } catch {
         // container may be hidden mid-layout; harmless
       }
     };
     window.addEventListener("resize", onResize);
-    const ro = host ? new ResizeObserver(onResize) : null;
-    if (host) ro!.observe(host);
+    const observer = host ? new ResizeObserver(onResize) : null;
+    if (host) observer?.observe(host);
+
     const onFocusRequest = () => {
       if (activeRef.current === activeTab) term.focus();
     };
     document.addEventListener("focus-terminal", onFocusRequest);
 
-    // Follow live theme changes.
     const onTheme = (e: Event) => {
-      const id = (e as CustomEvent<Theme>).detail;
-      const colors = TERM_COLORS[id];
+      const colors = TERM_COLORS[(e as CustomEvent<ResolvedTheme>).detail];
       if (colors) term.options.theme = colors;
     };
     window.addEventListener("archymedes-theme", onTheme);
 
     return () => {
       window.removeEventListener("resize", onResize);
-      ro?.disconnect();
+      observer?.disconnect();
       document.removeEventListener("focus-terminal", onFocusRequest);
       window.removeEventListener("archymedes-theme", onTheme);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsed, activeTab, workspace]);
 
-  const [tick, setTick] = useState(0);
-
-  // Attach the active terminal's DOM when switching tabs.
+  // Attach the active terminal's DOM when switching tabs or expanding.
   useEffect(() => {
     if (collapsed) return;
     const host = hostRef.current;
@@ -150,16 +143,27 @@ export function TerminalPanel({ workspace, onFileChange }: Props) {
     if (host && entry && entry.term.element?.parentElement !== host) {
       host.innerHTML = "";
       if (entry.term.element) host.appendChild(entry.term.element);
-      try { entry.fit.fit(); } catch { /* hidden container */ }
+      try {
+        entry.fit.fit();
+      } catch {
+        // hidden container
+      }
       entry.term.focus();
     }
   }, [activeTab, collapsed, tick]);
 
+  useEffect(() => {
+    const terms = termsRef.current;
+    return () => {
+      for (const entry of terms.values()) entry.dispose();
+      terms.clear();
+    };
+  }, []);
+
   const closeTab = (tabId: number) => {
-    const entry = termsRef.current.get(tabId);
-    entry?.dispose();
+    termsRef.current.get(tabId)?.dispose();
     termsRef.current.delete(tabId);
-    const next = tabIds.filter((t) => t !== tabId);
+    const next = tabIds.filter((id) => id !== tabId);
     if (next.length === 0) {
       setTabIds([0]);
       setActiveTab(0);
@@ -169,47 +173,58 @@ export function TerminalPanel({ workspace, onFileChange }: Props) {
     }
   };
 
+  const addTab = () => {
+    const newId = Math.max(...tabIds) + 1;
+    setTabIds((ids) => [...ids, newId]);
+    setActiveTab(newId);
+  };
+
   return (
-    <div className={`terminal-panel${collapsed ? " collapsed" : ""}`}>
+    <section
+      className={`terminal-panel${collapsed ? " collapsed" : ""}`}
+      style={collapsed ? undefined : { height }}
+      aria-label={t("terminal.title")}
+    >
       <div className="terminal-chrome">
-        <div className="terminal-tabs">
-          <span className="term-label" onClick={() => setCollapsed((c) => !c)}>
-            <span className="toggle">{collapsed ? "▲" : "▼"}</span> terminal
-          </span>
-          {!collapsed &&
-            tabIds.map((tabId) => (
-              <span
+        <button className="terminal-toggle" onClick={onToggleCollapsed} aria-expanded={!collapsed}>
+          <Icon name={collapsed ? "chevronRight" : "chevronDown"} size={12} flipRtl />
+          <Icon name="terminal" size={13} />
+          <span>{t("terminal.title")}</span>
+        </button>
+        {!collapsed && (
+          <div className="term-tabs" role="tablist">
+            {tabIds.map((tabId) => (
+              <div
                 key={tabId}
+                role="tab"
+                aria-selected={tabId === activeTab}
+                tabIndex={tabId === activeTab ? 0 : -1}
                 className={`term-tab${tabId === activeTab ? " active" : ""}`}
                 onClick={() => setActiveTab(tabId)}
               >
-                shell {tabId + 1}
+                {t("terminal.shell", { n: formatNumber(tabId + 1) })}
                 {tabIds.length > 1 && (
                   <button
-                    className="term-close"
-                    onClick={(e) => { e.stopPropagation(); closeTab(tabId); }}
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tabId);
+                    }}
+                    aria-label={t("terminal.close")}
+                    title={t("terminal.close")}
                   >
-                    ✕
+                    <Icon name="x" size={11} />
                   </button>
                 )}
-              </span>
+              </div>
             ))}
-          {!collapsed && (
-            <button
-              className="term-add"
-              title="New terminal"
-              onClick={() => {
-                const newId = Math.max(...tabIds) + 1;
-                setTabIds((ids) => [...ids, newId]);
-                setActiveTab(newId);
-              }}
-            >
-              ＋
+            <button className="icon-btn" onClick={addTab} title={t("terminal.new")} aria-label={t("terminal.new")}>
+              <Icon name="plus" size={14} />
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
-      {!collapsed && <div className="terminal-body" ref={hostRef} />}
-    </div>
+      {!collapsed && <div className="terminal-body" ref={hostRef} dir="ltr" />}
+    </section>
   );
 }

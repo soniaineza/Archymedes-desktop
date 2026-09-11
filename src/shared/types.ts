@@ -36,7 +36,12 @@ export interface ChatMessage {
   content: string;
   toolCalls?: ToolCallInfo[];
   pending?: boolean;
+  /** A message waiting for the current run to finish; UI-only, never sent or saved. */
+  queued?: boolean;
 }
+
+/** Currency the price catalog publishes in; costs are converted from it. */
+export const PRICE_CATALOG_CURRENCY = "USD";
 
 export type AgentStatus =
   | "idle"
@@ -53,8 +58,12 @@ export interface ProviderSettings {
   /** Base URL override; empty = adapter default. */
   baseUrl: string;
   maxIterations: number;
-  /** ISO currency code for cost display (from the CLI's multi-currency ledger). */
+  /** ISO 4217 code costs are displayed in. */
   currency: string;
+  /** Units of `currency` per 1 unit of the price catalog's currency; 0 = show the catalog currency. */
+  exchangeRate: number;
+  /** English name of the language the agent replies in; "" = match the user's messages. */
+  responseLanguage: string;
 }
 
 /**
@@ -73,7 +82,7 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   deepseek: "DeepSeek",
   mistral: "Mistral",
   groq: "Groq",
-  ollama: "Ollama (local)",
+  ollama: "Ollama",
   "openai-compatible": "OpenAI-compatible",
 };
 
@@ -105,6 +114,8 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   baseUrl: "",
   maxIterations: 40,
   currency: "USD",
+  exchangeRate: 0,
+  responseLanguage: "",
 };
 
 /** Running cost accounting, streamed with each model turn. */
@@ -112,11 +123,22 @@ export interface CostInfo {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
-  /** Total cost formatted in the user's currency. */
-  formatted: string;
+  /** Total cost in millionths of one unit of `currency`; the renderer formats it for the user's locale. */
+  costMicros: number;
+  currency: string;
+  /** True when converted from the catalog currency with the user's exchange rate. */
+  converted: boolean;
   /** Unpriced models report unknown rather than zero. */
   unpriced: boolean;
 }
+
+/** Stable error identifiers the renderer translates; the raw message is kept as a fallback. */
+export const AGENT_ERROR_CODES = {
+  noApiKey: "ARCHY_NO_API_KEY",
+  noWorkspace: "ARCHY_NO_WORKSPACE",
+} as const;
+
+export type AgentErrorCode = "iteration-limit";
 
 // ---------- Terminal ----------
 
@@ -256,11 +278,11 @@ export type AgentEvent =
   | { type: "message-end"; id: string }
   | { type: "cost"; cost: CostInfo }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; code?: AgentErrorCode; params?: Record<string, number> };
 
 export interface ArchymedesApi {
   // fs
-  pickWorkspace(): Promise<string | null>;
+  pickWorkspace(dialogTitle?: string): Promise<string | null>;
   getWorkspace(): Promise<string | null>;
   setWorkspace(path: string): Promise<void>;
   listDirTree(path: string): Promise<FileNode[]>;
@@ -270,6 +292,9 @@ export interface ArchymedesApi {
   // settings
   getSettings(): Promise<ProviderSettings>;
   saveSettings(settings: ProviderSettings): Promise<void>;
+
+  // window
+  setZoomFactor(factor: number): void;
 
   // agent
   sendAgentMessage(history: ChatMessage[], sessionId?: string): Promise<void>;

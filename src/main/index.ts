@@ -28,9 +28,18 @@ function createWindow(): void {
     },
   });
 
+  // Only web links go to the OS: file:// or custom schemes could launch local programs.
+  const openIfWebLink = (url: string): void => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  };
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openIfWebLink(url);
     return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url === mainWindow?.webContents.getURL()) return;
+    event.preventDefault();
+    openIfWebLink(url);
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {

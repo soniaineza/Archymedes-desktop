@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 import type {
   AgentEvent,
   ChatMessage,
@@ -6,7 +6,7 @@ import type {
   ProviderSettings,
   SessionData,
 } from "../shared/types";
-import { IPC } from "../shared/types";
+import { AGENT_ERROR_CODES, IPC } from "../shared/types";
 import {
   getWorkspacePath,
   listDirTree,
@@ -39,7 +39,6 @@ export function registerIpc(): void {
   const terminalManager = new TerminalManager();
   const watcher = new WorkspaceWatcher();
   let agentRunner: AgentRunner | null = null;
-  let currentSessionId: string | null = null;
 
   const send = (channel: string, ...payload: unknown[]): void => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -47,17 +46,14 @@ export function registerIpc(): void {
     }
   };
 
-  const focused = (): boolean =>
-    BrowserWindow.getAllWindows().some((w) => w.isFocused());
-
   // ---------- workspace / fs ----------
 
-  ipcMain.handle(IPC.PickWorkspace, async (e) => {
+  ipcMain.handle(IPC.PickWorkspace, async (e, dialogTitle?: unknown) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return null;
     const result = await dialog.showOpenDialog(win, {
       properties: ["openDirectory", "createDirectory"],
-      title: "Choose a workspace folder",
+      title: typeof dialogTitle === "string" && dialogTitle.trim() ? dialogTitle.slice(0, 200) : "Choose a workspace folder",
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     setWorkspacePath(result.filePaths[0]);
@@ -91,32 +87,16 @@ export function registerIpc(): void {
 
   // ---------- agent ----------
 
-  ipcMain.handle(IPC.AgentSend, async (_e, history: ChatMessage[], sessionId?: string) => {
+  // Errors carry stable codes; the renderer shows them in the user's language.
+  ipcMain.handle(IPC.AgentSend, async (_e, history: ChatMessage[]) => {
     const settings = await loadSettings();
     const workspace = getWorkspacePath();
-    if (!workspace) throw new Error("No workspace open");
-    if (!settings.apiKey) {
-      throw new Error(
-        "No API key configured. Open Settings (the gear icon) and add your provider key.",
-      );
+    if (!workspace) throw new Error(AGENT_ERROR_CODES.noWorkspace);
+    if (!settings.apiKey && settings.provider !== "ollama") {
+      throw new Error(AGENT_ERROR_CODES.noApiKey);
     }
-    currentSessionId = sessionId ?? null;
     agentRunner?.cancel();
-    agentRunner = new AgentRunner(settings, workspace, async (event: AgentEvent) => {
-      // Snapshot a file's previous content the moment the agent writes it,
-      // so diffs/revert are always available.
-      if (event.type === "tool-result") {
-        // tool-result carries no path; snapshots are taken in tools.ts instead.
-      }
-      send(IPC.AgentEvent, event);
-      // Notify when the run finishes and the window is not focused.
-      if (event.type === "status" && event.status === "idle" && !focused()) {
-        const title = currentSessionId ? "Archymedes" : "Archymedes";
-        if (Notification.isSupported()) {
-          new Notification({ title, body: "Agent finished — take a look." }).show();
-        }
-      }
-    });
+    agentRunner = new AgentRunner(settings, workspace, (event: AgentEvent) => send(IPC.AgentEvent, event));
     await agentRunner.run(history);
   });
 

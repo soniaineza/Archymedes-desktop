@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 import type { ArchymedesApi, AgentEvent } from "../shared/types";
 import { IPC } from "../shared/types";
 
@@ -8,8 +8,13 @@ import { IPC } from "../shared/types";
  */
 
 const api: ArchymedesApi = {
+  // window
+  setZoomFactor: (factor) => {
+    if (Number.isFinite(factor) && factor >= 0.5 && factor <= 2) webFrame.setZoomFactor(factor);
+  },
+
   // fs
-  pickWorkspace: () => ipcRenderer.invoke(IPC.PickWorkspace),
+  pickWorkspace: (dialogTitle) => ipcRenderer.invoke(IPC.PickWorkspace, dialogTitle),
   getWorkspace: () => ipcRenderer.invoke(IPC.GetWorkspace),
   setWorkspace: (p) => ipcRenderer.invoke(IPC.SetWorkspace, p),
   listDirTree: (p) => ipcRenderer.invoke(IPC.ListDirTree, p),

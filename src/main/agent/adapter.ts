@@ -75,20 +75,18 @@ export function historyToTurns(history: ChatMessage[]): RuntimeTurn[] {
           args: tc.args,
         })),
       });
-      for (const tc of msg.toolCalls) {
-        turns.push({
-          kind: "tool-results",
-          results: [
-            {
-              toolCallId: tc.id,
-              name: tc.name,
-              args: tc.args,
-              result: tc.result ?? "(no result)",
-              isError: tc.isError ?? false,
-            },
-          ],
-        });
-      }
+      // All results for one assistant turn go back together; splitting them
+      // across messages discourages the model from making parallel calls.
+      turns.push({
+        kind: "tool-results",
+        results: msg.toolCalls.map((tc) => ({
+          toolCallId: tc.id,
+          name: tc.name,
+          args: tc.args,
+          result: tc.result ?? "(no result)",
+          isError: tc.isError ?? false,
+        })),
+      });
     } else if (msg.content.trim().length > 0) {
       turns.push({ kind: "text", role: msg.role, text: msg.content });
     }

@@ -98,6 +98,17 @@ export function HeroCanvas() {
       group.add(ring);
     }
 
+    // Follow the theme's text color so the spiral stays visible on light themes.
+    const materials = [pointsMat, coreLine.material, ...rings.map((ring) => ring.material)] as THREE.PointsMaterial[];
+    const applyThemeColor = () => {
+      const token = getComputedStyle(document.documentElement).getPropertyValue("--text").trim();
+      if (!token) return;
+      const color = new THREE.Color(token);
+      for (const material of materials) material.color.set(color);
+    };
+    applyThemeColor();
+    window.addEventListener("archymedes-theme", applyThemeColor);
+
     // ---------- interaction & loop ----------
     let pointerX = 0;
     let pointerY = 0;
@@ -147,6 +158,7 @@ export function HeroCanvas() {
       running = false;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("archymedes-theme", applyThemeColor);
       host.removeEventListener("pointermove", onPointer);
       renderer.dispose();
       pointsGeo.dispose();

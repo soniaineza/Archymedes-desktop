@@ -28,6 +28,13 @@ export function addMoney(a: Money, b: Money): Money {
   return money(a.micros + b.micros, a.currency);
 }
 
+/** Convert at a user-supplied rate: units of `to` per one unit of `value.currency`. */
+export function convertMoney(value: Money, to: Currency, rate: number): Money {
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Invalid exchange rate: ${rate}`);
+  if (value.currency === to) return value;
+  return money(value.micros * rate, to);
+}
+
 const FORMATS: Record<string, { symbol: string; min: number; max: number; smallThreshold: number; smallDigits: number }> = {
   USD: { symbol: "$", min: 2, max: 2, smallThreshold: 0.01, smallDigits: 4 },
   RWF: { symbol: "RWF", min: 0, max: 0, smallThreshold: 0, smallDigits: 0 },

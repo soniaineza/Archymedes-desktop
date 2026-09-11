@@ -5,9 +5,9 @@ import type { HistoryToolResult, RuntimeTurn } from "./adapter";
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { createAdapter } from "./adapters";
 import { readFileEntry } from "../workspace-store";
-import { budgetsFor } from "../core/model-capabilities";
+import { listFilesFallback } from "../core/workspace-bridge";
 import { catalogPricesOf } from "../core/price-lookup";
-import { priceUsage, formatMoney, addMoney, money } from "../core/money";
+import { priceUsage, convertMoney, addMoney, money } from "../core/money";
 import { PROVIDER_INFO } from "../core/providers";
 
 /**
@@ -27,16 +27,36 @@ Guidelines:
 - Paths are workspace-relative with forward slashes.
 - Be concise in your final answer: what changed, why, and what the user should do next.`;
 
+export function systemPromptFor(responseLanguage: string): string {
+  const language = responseLanguage.trim();
+  const rule = language
+    ? `Always write your replies in ${language}, whatever language the user writes in.`
+    : "Reply in the language the user writes in.";
+  return `${SYSTEM_PROMPT}\n- ${rule} Keep code, identifiers, file paths and commands unchanged.`;
+}
+
 function id(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const MAX_MENTION_LISTING = 16_000;
+
+/** @path mentions at a word start (so emails don't match), minus trailing punctuation. */
+export function parseMentions(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
+    const mention = match[1].replace(/[.,;:!?]+$/, "");
+    if (mention) found.add(mention);
+  }
+  return [...found];
+}
+
 /** Expand @path mentions in the latest user message into explicit file context. */
-async function expandMentions(turns: RuntimeTurn[]): Promise<void> {
+async function expandMentions(turns: RuntimeTurn[], workspace: string): Promise<void> {
   const lastUser = [...turns].reverse().find((t) => t.kind === "text" && t.role === "user");
   if (!lastUser || lastUser.kind !== "text") return;
 
-  const mentions = [...lastUser.text.matchAll(/@([\w./-]+)/g)].map((m) => m[1]);
+  const mentions = parseMentions(lastUser.text);
   if (mentions.length === 0) return;
 
   const parts: string[] = [];
@@ -45,7 +65,12 @@ async function expandMentions(turns: RuntimeTurn[]): Promise<void> {
       const entry = await readFileEntry(mention);
       parts.push(`Contents of @${mention}:\n\n\`\`\`\n${entry.content}\n\`\`\``);
     } catch {
-      parts.push(`@${mention}: (file not found or unreadable)`);
+      try {
+        const listing = (await listFilesFallback(workspace, mention)).slice(0, MAX_MENTION_LISTING);
+        parts.push(`Files under @${mention}:\n\n\`\`\`\n${listing}\n\`\`\``);
+      } catch {
+        parts.push(`@${mention}: (file not found or unreadable)`);
+      }
     }
   }
   turns.push({ kind: "text", role: "user", text: parts.join("\n\n") });
@@ -69,22 +94,26 @@ export class AgentRunner {
 
     const adapter = createAdapter(this.settings);
     const turns: RuntimeTurn[] = historyToTurns(history);
-    await expandMentions(turns);
-
-    // Budgets sized from the model's real capabilities (CLI core).
-    const { contextLimit } = budgetsFor(this.settings.model);
-    void contextLimit;
+    await expandMentions(turns, this.workspace);
 
     // Prices from the dated catalog; unpriced providers report honestly.
+    // Totals are kept in the catalog's currency: there are no FX rates, and
+    // adding e.g. USD prices to a EUR total throws.
     const prices = catalogPricesOf(this.settings.provider, this.settings.model);
-    const totals = { input: 0, output: 0, cached: 0, cost: money(0, this.settings.currency) };
+    const totals = { input: 0, output: 0, cached: 0, cost: money(0, prices?.currency ?? this.settings.currency) };
+
+    const { currency: displayCurrency, exchangeRate } = this.settings;
+    const convert = displayCurrency !== totals.cost.currency && exchangeRate > 0;
 
     const emitCost = () => {
+      const shown = convert ? convertMoney(totals.cost, displayCurrency, exchangeRate) : totals.cost;
       const info: CostInfo = {
         inputTokens: totals.input,
         outputTokens: totals.output,
         cachedInputTokens: totals.cached,
-        formatted: formatMoney(totals.cost),
+        costMicros: shown.micros,
+        currency: shown.currency,
+        converted: convert,
         unpriced: !prices,
       };
       this.emit({ type: "cost", cost: info });
@@ -108,7 +137,7 @@ export class AgentRunner {
         this.emit({ type: "message-start", id: msgId });
 
         await adapter.runTurn({
-          systemPrompt: SYSTEM_PROMPT,
+          systemPrompt: systemPromptFor(this.settings.responseLanguage ?? ""),
           turns,
           tools: AGENT_TOOLS,
           signal: this.controller.signal,
@@ -173,9 +202,6 @@ export class AgentRunner {
           return;
         }
 
-        if (assistantText.trim().length > 0) {
-          turns.push({ kind: "text", role: "assistant", text: assistantText });
-        }
         turns.push({ kind: "assistant-toolcalls", text: assistantText, calls });
 
         const results: HistoryToolResult[] = [];
@@ -207,6 +233,8 @@ export class AgentRunner {
         this.emit({
           type: "error",
           message: `Reached the iteration limit (${this.settings.maxIterations}).`,
+          code: "iteration-limit",
+          params: { count: this.settings.maxIterations },
         });
         this.emit({ type: "status", status: "error" });
       }

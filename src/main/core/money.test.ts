@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMoney, formatMoney, fromUnits, money, priceUsage, tokenPrices } from "./money";
+import { addMoney, convertMoney, formatMoney, fromUnits, money, priceUsage, tokenPrices } from "./money";
 
 describe("money", () => {
   it("rounds fractional micros to the nearest integer", () => {
@@ -30,6 +30,24 @@ describe("money", () => {
 
   it("formats very small USD amounts with extra precision", () => {
     expect(formatMoney(fromUnits(0.0042, "USD"))).toBe("$0.0042");
+  });
+});
+
+describe("convertMoney", () => {
+  it("converts at units of the target per unit of the source", () => {
+    const rwf = convertMoney(fromUnits(0.5, "USD"), "RWF", 1450);
+    expect(rwf).toEqual({ micros: 725_000_000, currency: "RWF" });
+  });
+
+  it("returns the value unchanged for the same currency", () => {
+    const usd = fromUnits(2, "USD");
+    expect(convertMoney(usd, "USD", 3)).toBe(usd);
+  });
+
+  it("rejects zero, negative or non-finite rates", () => {
+    expect(() => convertMoney(fromUnits(1, "USD"), "EUR", 0)).toThrow();
+    expect(() => convertMoney(fromUnits(1, "USD"), "EUR", -1)).toThrow();
+    expect(() => convertMoney(fromUnits(1, "USD"), "EUR", NaN)).toThrow();
   });
 });
 

@@ -37,6 +37,17 @@ describe("workspace-store symlink confinement", () => {
     await expect(fs.readFile(path.join(outside, "evil.txt"), "utf8")).rejects.toThrow();
   });
 
+  it("works when the workspace root itself is opened through a symlink", async () => {
+    const linkedRoot = path.join(outside, "linked-root");
+    await fs.symlink(root, linkedRoot);
+    setWorkspacePath(linkedRoot);
+    await fs.writeFile(path.join(root, "a.txt"), "hi");
+    expect((await readFileEntry("a.txt")).content).toBe("hi");
+    await writeFileEntry("sub/new.txt", "new");
+    expect(await fs.readFile(path.join(root, "sub/new.txt"), "utf8")).toBe("new");
+    expect((await listDirTree("")).length).toBeGreaterThan(0);
+  });
+
   it("refuses to list a symlinked directory that escapes the workspace", async () => {
     await fs.writeFile(path.join(outside, "secret.txt"), "top secret");
     await fs.symlink(outside, path.join(root, "out-link"));

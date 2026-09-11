@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type { ProviderSettings } from "../../shared/types";
+import { budgetsFor } from "../core/model-capabilities";
+import { defaultBaseUrl, isProviderId } from "../core/providers";
 import type {
   AdapterEvent,
   AgentAdapter,
@@ -72,10 +74,21 @@ class AnthropicAdapter implements AgentAdapter {
       }
     }
 
+    // Two cache breakpoints: the system block (covers tools + system, which
+    // render first) and the newest message block, so each loop iteration
+    // reads the whole prior conversation from cache.
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && Array.isArray(lastMessage.content) && lastMessage.content.length > 0) {
+      const lastBlock = lastMessage.content[lastMessage.content.length - 1] as {
+        cache_control?: Anthropic.CacheControlEphemeral | null;
+      };
+      lastBlock.cache_control = { type: "ephemeral" };
+    }
+
     const stream = client.messages.stream({
       model: this.settings.model,
-      max_tokens: 8192,
-      system: input.systemPrompt,
+      max_tokens: budgetsFor(this.settings.model).maxOutputTokens,
+      system: [{ type: "text", text: input.systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
       tools: input.tools.map((t) => ({
         name: t.name,
@@ -105,13 +118,16 @@ class AnthropicAdapter implements AgentAdapter {
       }
     }
 
+    // Anthropic's input_tokens excludes cache reads and writes; the core's
+    // pricing treats cached tokens as a subset of input, so fold them back in.
+    // Cache writes are priced at the base input rate (the API bills 1.25x).
+    const cacheRead = finalMessage.usage.cache_read_input_tokens ?? 0;
+    const cacheWrite = finalMessage.usage.cache_creation_input_tokens ?? 0;
     input.onEvent({
       type: "usage",
-      inputTokens: finalMessage.usage.input_tokens,
+      inputTokens: finalMessage.usage.input_tokens + cacheRead + cacheWrite,
       outputTokens: finalMessage.usage.output_tokens,
-      // Cache reads are what make a long agent session affordable; the CLI's
-      // accounting folds them in so the cost display reflects reality.
-      cachedInputTokens: finalMessage.usage.cache_read_input_tokens ?? 0,
+      cachedInputTokens: cacheRead,
     });
 
     const usedTools = finalMessage.content.some((b) => b.type === "tool_use");
@@ -148,9 +164,11 @@ class OpenAICompatAdapter implements AgentAdapter {
     onEvent: (event: AdapterEvent) => void;
     signal: AbortSignal;
   }): Promise<void> {
+    const provider = this.settings.provider;
     const client = new OpenAI({
-      apiKey: this.settings.apiKey,
-      baseURL: this.settings.baseUrl || undefined,
+      // Ollama ignores the key, but the SDK refuses an empty one.
+      apiKey: this.settings.apiKey || "ollama",
+      baseURL: this.settings.baseUrl || (isProviderId(provider) ? defaultBaseUrl(provider) : undefined),
     });
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -198,7 +216,7 @@ class OpenAICompatAdapter implements AgentAdapter {
           parameters: t.parameters,
         },
       })),
-    });
+    }, { signal: input.signal });
 
     const toolAccum = new Map<
       number,
@@ -262,7 +280,9 @@ class OpenAICompatAdapter implements AgentAdapter {
 
     input.onEvent({
       type: "finish",
-      stopReason: finished ? "tool-use" : "end-turn",
+      // Some OpenAI-compatible hosts (Gemini, Ollama) report finish_reason
+      // "stop" even when they emitted tool calls; trust the calls themselves.
+      stopReason: finished || toolAccum.size > 0 ? "tool-use" : "end-turn",
     });
   }
 }
