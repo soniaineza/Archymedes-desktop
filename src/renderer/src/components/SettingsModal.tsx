@@ -1,13 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  DEFAULT_PROVIDER_SETTINGS,
-  PRICE_CATALOG_CURRENCY,
-  PROVIDER_DEFAULT_BASE_URLS,
-  PROVIDER_DEFAULT_MODELS,
-  PROVIDER_LABELS,
-} from "@shared/types";
-import type { ProviderId, ProviderSettings } from "@shared/types";
+import { DEFAULT_PROVIDER_SETTINGS, PRICE_CATALOG_CURRENCY } from "@shared/types";
+import type { ProviderSettings } from "@shared/types";
+import { PROVIDER_IDS, PROVIDER_INFO } from "@shared/providers";
+import type { ProviderId } from "@shared/providers";
 import { Icon } from "./Icon";
 import type { IconName } from "./Icon";
 import { LanguageSelect } from "./LanguageSelect";
@@ -39,8 +35,6 @@ const TABS: readonly { id: Tab; icon: IconName; label: MessageKey }[] = [
 ];
 
 const UI_SCALES = [0.9, 1, 1.1, 1.25];
-
-const PROVIDER_IDS = Object.keys(PROVIDER_LABELS) as ProviderId[];
 
 /** Background, panel, text, accent. */
 const THEME_PREVIEW: Record<ResolvedTheme, [string, string, string, string]> = {
@@ -107,7 +101,7 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
     setSettings((s) => ({ ...s, [key]: value }));
 
   const pickProvider = (id: ProviderId) =>
-    setSettings((s) => ({ ...s, provider: id, model: PROVIDER_DEFAULT_MODELS[id], baseUrl: PROVIDER_DEFAULT_BASE_URLS[id] ?? "" }));
+    setSettings((s) => ({ ...s, provider: id, model: PROVIDER_INFO[id].defaultModel, baseUrl: PROVIDER_INFO[id].defaultBaseUrl ?? "" }));
 
   // Accept both "1450.5" and the decimal comma many locales type: "1450,5".
   const parsedRate = Number(rateText.trim().replace(",", "."));
@@ -246,7 +240,7 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                 >
                   {PROVIDER_IDS.map((id) => (
                     <option key={id} value={id}>
-                      {PROVIDER_LABELS[id]}
+                      {PROVIDER_INFO[id].label}
                     </option>
                   ))}
                 </select>
@@ -258,7 +252,7 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                   dir="ltr"
                   spellCheck={false}
                   value={settings.model}
-                  placeholder={PROVIDER_DEFAULT_MODELS[settings.provider]}
+                  placeholder={PROVIDER_INFO[settings.provider]?.defaultModel}
                   onChange={(e) => update("model", e.target.value)}
                 />
               </Field>
@@ -272,7 +266,11 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                     autoComplete="off"
                     spellCheck={false}
                     value={settings.apiKey}
-                    placeholder={settings.provider === "ollama" ? t("settings.apiKeyNotRequired") : t("settings.apiKeyPlaceholder")}
+                    placeholder={
+                      PROVIDER_INFO[settings.provider]?.requiresApiKey === false
+                        ? t("settings.apiKeyNotRequired")
+                        : t("settings.apiKeyPlaceholder")
+                    }
                     onChange={(e) => update("apiKey", e.target.value)}
                   />
                   <button
@@ -292,7 +290,7 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                   dir="ltr"
                   spellCheck={false}
                   value={settings.baseUrl}
-                  placeholder={PROVIDER_DEFAULT_BASE_URLS[settings.provider] ?? t("settings.baseUrlPlaceholder")}
+                  placeholder={PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder")}
                   onChange={(e) => update("baseUrl", e.target.value)}
                 />
               </Field>

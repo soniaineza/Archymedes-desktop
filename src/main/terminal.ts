@@ -7,26 +7,28 @@ import { spawn as ptySpawn, IPty } from "node-pty";
 
 export interface TerminalSession {
   id: string;
+  cwd: string;
   pty: IPty;
 }
 
-let nextId = 1;
-
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
+  private nextId = 1;
 
-  create(cwd?: string): { id: string } {
-    const id = `term-${nextId++}`;
+  create(cwd?: string): TerminalSession {
+    const id = `term-${this.nextId++}`;
     const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/bash";
+    const resolvedCwd = cwd || process.cwd();
     const pty = ptySpawn(shell, [], {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
-      cwd: cwd || process.cwd(),
+      cwd: resolvedCwd,
       env: process.env as { [key: string]: string },
     });
-    this.sessions.set(id, { id, pty });
-    return { id };
+    const session: TerminalSession = { id, cwd: resolvedCwd, pty };
+    this.sessions.set(id, session);
+    return session;
   }
 
   write(id: string, data: string): void {

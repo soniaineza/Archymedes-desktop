@@ -1,20 +1,27 @@
 import type { AgentEvent, ChatMessage, CostInfo, ProviderSettings } from "../../shared/types";
-import type { ToolInvocation } from "./adapter";
 import { historyToTurns } from "./adapter";
-import type { HistoryToolResult, RuntimeTurn } from "./adapter";
+import type { AgentAdapter, HistoryToolResult, RuntimeTurn, ToolInvocation } from "./adapter";
 import { AGENT_TOOLS, executeTool } from "./tools";
-import { createAdapter } from "./adapters";
-import { readFileEntry } from "../workspace-store";
+import type { ToolExecutor } from "./tools";
+import { readFileForEditor } from "../fs-ui";
 import { listFilesFallback } from "../core/workspace-bridge";
 import { catalogPricesOf } from "../core/price-lookup";
 import { priceUsage, convertMoney, addMoney, money } from "../core/money";
-import { PROVIDER_INFO } from "../core/providers";
 
 /**
- * The tool loop, now driven by the CLI core's accounting model: budgets sized
- * from the model's real capabilities, every turn priced through the dated
- * catalog with cached-input discounts, and unpriced models reported honestly.
+ * The tool loop, driven by the CLI core's accounting model: every turn priced
+ * through the dated catalog with cached-input discounts, and unpriced models
+ * reported honestly. The model and the snapshot store are injected.
  */
+
+export type AdapterFactory = (settings: ProviderSettings) => AgentAdapter;
+
+export interface RunnerDeps {
+  createAdapter: AdapterFactory;
+  /** Records a file's content before the agent changes it, for diff and revert. */
+  recordSnapshot(workspace: string, relPath: string): Promise<void>;
+  executeTool?: ToolExecutor;
+}
 
 const SYSTEM_PROMPT = `You are Archymedes, a coding agent working inside the user's workspace.
 
@@ -62,7 +69,7 @@ async function expandMentions(turns: RuntimeTurn[], workspace: string): Promise<
   const parts: string[] = [];
   for (const mention of mentions) {
     try {
-      const entry = await readFileEntry(mention);
+      const entry = await readFileForEditor(workspace, mention);
       parts.push(`Contents of @${mention}:\n\n\`\`\`\n${entry.content}\n\`\`\``);
     } catch {
       try {
@@ -80,9 +87,10 @@ export class AgentRunner {
   private controller = new AbortController();
 
   constructor(
-    private settings: ProviderSettings,
-    private workspace: string,
-    private emit: (event: AgentEvent) => void,
+    private readonly settings: ProviderSettings,
+    private readonly workspace: string,
+    private readonly emit: (event: AgentEvent) => void,
+    private readonly deps: RunnerDeps,
   ) {}
 
   cancel(): void {
@@ -91,10 +99,11 @@ export class AgentRunner {
 
   async run(history: ChatMessage[]): Promise<void> {
     this.controller = new AbortController();
-
-    const adapter = createAdapter(this.settings);
-    const turns: RuntimeTurn[] = historyToTurns(history);
-    await expandMentions(turns, this.workspace);
+    const runTool = this.deps.executeTool ?? executeTool;
+    const toolContext = {
+      workspace: this.workspace,
+      recordSnapshot: (relPath: string) => this.deps.recordSnapshot(this.workspace, relPath),
+    };
 
     // Prices from the dated catalog; unpriced providers report honestly.
     // Totals are kept in the catalog's currency: there are no FX rates, and
@@ -123,6 +132,10 @@ export class AgentRunner {
     this.emit({ type: "status", status: "thinking" });
 
     try {
+      const adapter = this.deps.createAdapter(this.settings);
+      const turns: RuntimeTurn[] = historyToTurns(history);
+      await expandMentions(turns, this.workspace);
+
       while (iteration < this.settings.maxIterations) {
         if (this.controller.signal.aborted) break;
         iteration += 1;
@@ -163,17 +176,12 @@ export class AgentRunner {
                 errorMessage = event.errorMessage;
                 break;
               case "usage": {
-                // Price with the catalog (cached-input aware), not flat rates.
                 totals.input += event.inputTokens;
                 totals.output += event.outputTokens;
                 totals.cached += event.cachedInputTokens ?? 0;
                 if (prices) {
                   const turnCost = priceUsage(
-                    {
-                      inputTokens: event.inputTokens,
-                      outputTokens: event.outputTokens,
-                      cachedInputTokens: event.cachedInputTokens,
-                    },
+                    { inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedInputTokens: event.cachedInputTokens },
                     prices,
                   );
                   totals.cost = addMoney(totals.cost, turnCost);
@@ -207,21 +215,9 @@ export class AgentRunner {
         const results: HistoryToolResult[] = [];
         for (const call of calls) {
           if (this.controller.signal.aborted) break;
-          const result = await executeTool(call.name, call.args, this.workspace);
-          const isError = result.startsWith("Error");
-          results.push({
-            toolCallId: call.toolCallId,
-            name: call.name,
-            args: call.args,
-            result,
-            isError,
-          });
-          this.emit({
-            type: "tool-result",
-            toolCallId: call.toolCallId,
-            result,
-            isError,
-          });
+          const { output, isError } = await runTool(call.name, call.args, toolContext);
+          results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result: output, isError });
+          this.emit({ type: "tool-result", toolCallId: call.toolCallId, result: output, isError });
         }
         turns.push({ kind: "tool-results", results });
       }
@@ -239,9 +235,8 @@ export class AgentRunner {
         this.emit({ type: "status", status: "error" });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       if (!this.controller.signal.aborted) {
-        this.emit({ type: "error", message });
+        this.emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
         this.emit({ type: "status", status: "error" });
       } else {
         this.emit({ type: "status", status: "idle" });
@@ -249,9 +244,4 @@ export class AgentRunner {
       }
     }
   }
-}
-
-/** Label used in the chat header, from the CLI's provider registry. */
-export function providerLabel(settings: ProviderSettings): string {
-  return `${PROVIDER_INFO[settings.provider]?.label ?? settings.provider} · ${settings.model}`;
 }

@@ -13,32 +13,49 @@ export type WorkspaceLimits = {
   ignoredDirectories: readonly string[];
 };
 
+/** The one ignore list: agent tools, the file tree, search and the watcher all skip these. */
 export const DEFAULT_WORKSPACE_LIMITS: WorkspaceLimits = {
   maxReadBytes: 512_000,
   maxWriteBytes: 512_000,
-  ignoredDirectories: [".git", "node_modules", ".next", "dist", "build", "target", "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".turbo", "vendor", ".archymedes", "coverage", "test-results", ".convex", ".wrangler"],
+  ignoredDirectories: [".git", "node_modules", ".next", "dist", "build", "out", "release", "target", "__pycache__", ".venv", "venv", ".cache", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".turbo", "vendor", ".archymedes", "coverage", "test-results", ".convex", ".wrangler"],
 };
 
 export class WorkspaceViolation extends Error {}
 
+function escapes(from: string, to: string): boolean {
+  const relative = path.relative(from, to);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+/**
+ * The workspace boundary, for every file operation in the app. Rejects `..`
+ * escapes, and symlinks that lead outside — including through a parent
+ * directory of a path that doesn't exist yet, which `mkdir -p` would follow.
+ */
 export async function realPathWithin(root: string, candidate: string): Promise<string> {
   const absolute = path.resolve(root, candidate);
-  const relative = path.relative(root, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (escapes(root, absolute)) {
     throw new WorkspaceViolation(`${candidate} is outside the project root`);
   }
-  // An existing path's symlink chain must also stay inside the tree.
-  try {
-    const real = await fs.realpath(absolute);
-    const realRelative = path.relative(root, real);
-    if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
-      throw new WorkspaceViolation(`${candidate} resolves outside the project root through a symlink`);
+  // Compare real paths with real paths: the root itself may be reached through a symlink.
+  const realRoot = await fs.realpath(root).catch(() => path.resolve(root));
+
+  let probe = absolute;
+  for (;;) {
+    try {
+      const real = await fs.realpath(probe);
+      if (escapes(realRoot, real)) {
+        throw new WorkspaceViolation(`${candidate} resolves outside the project root through a symlink`);
+      }
+      return probe === absolute ? real : absolute;
+    } catch (error) {
+      if (error instanceof WorkspaceViolation) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // Doesn't exist yet: its nearest existing ancestor decides where it would land.
+      const parent = path.dirname(probe);
+      if (parent === probe) return absolute;
+      probe = parent;
     }
-    return real;
-  } catch (error) {
-    if (error instanceof WorkspaceViolation) throw error;
-    // Not found yet: the lexical check above is the answer we can give.
-    return absolute;
   }
 }
 

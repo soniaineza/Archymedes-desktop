@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AGENT_ERROR_CODES } from "@shared/types";
+import { parseAppError } from "@shared/app-error";
+import type { AppErrorInfo } from "@shared/app-error";
 import type {
-  AgentErrorCode,
   AgentEvent,
   AgentStatus,
   ChatMessage,
@@ -29,24 +29,6 @@ function titleFrom(text: string): string {
   return (text.trim().split("\n")[0] ?? "").slice(0, 60);
 }
 
-export type AgentErrorKind = AgentErrorCode | "no-api-key" | "no-workspace";
-
-export interface AgentErrorInfo {
-  /** Untranslated detail, shown when there is no code or alongside it. */
-  message: string;
-  code?: AgentErrorKind;
-  params?: Record<string, number>;
-}
-
-const IPC_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/;
-
-function errorFromUnknown(err: unknown): AgentErrorInfo {
-  const message = (err instanceof Error ? err.message : String(err)).replace(IPC_ERROR_PREFIX, "");
-  if (message.includes(AGENT_ERROR_CODES.noApiKey)) return { message, code: "no-api-key" };
-  if (message.includes(AGENT_ERROR_CODES.noWorkspace)) return { message, code: "no-workspace" };
-  return { message };
-}
-
 function withoutQueued(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m) => !m.queued);
 }
@@ -57,7 +39,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
   const [session, setSession] = useState<SessionData>(newSession);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [status, setStatus] = useState<AgentStatus>("idle");
-  const [error, setError] = useState<AgentErrorInfo | null>(null);
+  const [error, setError] = useState<AppErrorInfo | null>(null);
   const [usage, setUsage] = useState<CostInfo | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
   const [dirtyFlag, setDirtyFlag] = useState(0); // bump to trigger session-list refresh
@@ -200,8 +182,8 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       };
       sessionRef.current = next;
       setSession(next);
-      void window.archymedes.sendAgentMessage(withoutQueued(next.messages), next.id).catch((err: unknown) => {
-        setError(errorFromUnknown(err));
+      void window.archymedes.sendAgentMessage(withoutQueued(next.messages)).catch((err: unknown) => {
+        setError(parseAppError(err));
         setStatus("error");
       });
     },
@@ -210,7 +192,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
   sendRef.current = send;
 
   const cancel = useCallback(() => {
-    window.archymedes.cancelAgent();
+    void window.archymedes.cancelAgent();
   }, []);
 
   const reset = useCallback(() => {

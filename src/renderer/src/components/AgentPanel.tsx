@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { ChatMessage, ToolCallInfo } from "@shared/types";
-import type { AgentController, AgentErrorInfo } from "../lib/useAgent";
+import type { AppErrorInfo } from "@shared/app-error";
+import type { AgentController } from "../lib/useAgent";
 import { useI18n } from "../i18n/I18nProvider";
 import type { MessageKey } from "../i18n/types";
 import { Icon } from "./Icon";
@@ -356,7 +357,7 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
-  const errorText = (err: AgentErrorInfo): string => {
+  const errorText = (err: AppErrorInfo): string => {
     switch (err.code) {
       case "no-api-key":
         return t("agent.error.noApiKey");

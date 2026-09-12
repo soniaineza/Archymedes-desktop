@@ -1,181 +1,100 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
-import type {
-  AgentEvent,
-  ChatMessage,
-  FileNode,
-  ProviderSettings,
-  SessionData,
-} from "../shared/types";
-import { AGENT_ERROR_CODES, IPC } from "../shared/types";
-import {
-  getWorkspacePath,
-  listDirTree,
-  readFileEntry,
-  setWorkspacePath,
-  writeFileEntry,
-} from "./workspace-store";
-import { loadSettings, saveSettings } from "./settings";
+import { AppError } from "../shared/app-error";
+import { PROVIDER_INFO } from "../shared/providers";
+import { listDirTree, readFileForEditor, writeFileFromEditor } from "./fs-ui";
 import { getGitInfo } from "./git";
+import { registerHandlers } from "./ipc-host";
+import type { HostBridge, IpcHost } from "./ipc-host";
 import { workspaceSearch } from "./search";
-import {
-  deleteSession,
-  listSessions,
-  loadSession,
-  renameSession,
-  saveSession,
-} from "./sessions";
-import { diffFile, revertFile, listEdits } from "./diffs";
-import { WorkspaceWatcher } from "./watcher";
-import { AgentRunner } from "./agent/runner";
-import { TerminalManager } from "./terminal";
-import { app } from "electron";
+import type { AppServices } from "./services";
+import { deleteSession, listSessions, loadSession, renameSession, saveSession } from "./sessions";
+import { loadSettings, saveSettings } from "./settings";
 
 /**
- * All IPC handlers. The renderer can only do what is exposed here through the
- * preload bridge — no direct fs, no direct process access.
+ * Every IPC handler. The renderer can only do what is exposed here through the
+ * preload bridge. Nothing in this module touches Electron directly: the host,
+ * the services and the bridge are all passed in.
  */
+export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBridge): void {
+  const { workspace, agent, watcher, terminals } = services;
+  const { userData } = services.paths;
 
-export function registerIpc(): void {
-  const terminalManager = new TerminalManager();
-  const watcher = new WorkspaceWatcher();
-  let agentRunner: AgentRunner | null = null;
-
-  const send = (channel: string, ...payload: unknown[]): void => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(channel, ...payload);
-    }
+  const switchWorkspace = (next: string | null): void => {
+    if (!workspace.setRoot(next)) return;
+    // A run must never keep writing into a workspace the user has left.
+    agent.cancel();
+    watcher.stop(); // re-started by the renderer for the new workspace
   };
 
-  // ---------- workspace / fs ----------
+  registerHandlers(
+    host,
+    {
+      // ---------- workspace / fs ----------
+      "fs:pick-workspace": async (dialogTitle) => {
+        const picked = await bridge.pickDirectory(dialogTitle?.trim() ? dialogTitle.slice(0, 200) : "Choose a workspace folder");
+        if (picked === null) return null;
+        switchWorkspace(picked);
+        return workspace.root;
+      },
+      "fs:get-workspace": () => workspace.root,
+      "fs:set-workspace": (path) => switchWorkspace(path),
+      "fs:list-tree": (relPath) => listDirTree(workspace.requireRoot(), relPath),
+      "fs:read-file": (relPath) => readFileForEditor(workspace.requireRoot(), relPath),
+      "fs:write-file": (relPath, content) => writeFileFromEditor(workspace.requireRoot(), relPath, content),
 
-  ipcMain.handle(IPC.PickWorkspace, async (e, dialogTitle?: unknown) => {
-    const win = BrowserWindow.fromWebContents(e.sender);
-    if (!win) return null;
-    const result = await dialog.showOpenDialog(win, {
-      properties: ["openDirectory", "createDirectory"],
-      title: typeof dialogTitle === "string" && dialogTitle.trim() ? dialogTitle.slice(0, 200) : "Choose a workspace folder",
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    setWorkspacePath(result.filePaths[0]);
-    watcher.stop(); // re-started by the renderer on workspace change
-    return getWorkspacePath();
-  });
+      // ---------- settings ----------
+      "settings:get": () => loadSettings(userData),
+      "settings:save": (settings) => saveSettings(userData, settings),
 
-  ipcMain.handle(IPC.GetWorkspace, () => getWorkspacePath());
+      // ---------- agent ----------
+      "agent:send": async (history) => {
+        const root = workspace.requireRoot();
+        const settings = await loadSettings(userData);
+        if (!settings.apiKey && PROVIDER_INFO[settings.provider]?.requiresApiKey !== false) {
+          throw new AppError("no-api-key", `No API key configured for ${settings.provider}`);
+        }
+        await agent.start(settings, root, history, (event) => bridge.emit("agent:event", event));
+      },
+      "agent:cancel": () => agent.cancel(),
 
-  ipcMain.handle(IPC.SetWorkspace, (_e, p: string) => {
-    setWorkspacePath(p);
-  });
+      // ---------- git / search ----------
+      "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
+      "search:workspace": (query) => workspaceSearch(workspace.requireRoot(), query),
 
-  ipcMain.handle(IPC.ListDirTree, (_e, relPath: string): Promise<FileNode[]> =>
-    listDirTree(relPath ?? ""),
-  );
+      // ---------- sessions ----------
+      "session:list": () => listSessions(userData),
+      "session:load": (id) => loadSession(userData, id),
+      "session:save": (session) => saveSession(userData, session),
+      "session:delete": (id) => deleteSession(userData, id),
+      "session:rename": (id, title) => renameSession(userData, id, title),
 
-  ipcMain.handle(IPC.ReadFile, (_e, relPath: string) => readFileEntry(relPath));
+      // ---------- diffs / revert ----------
+      "diff:file": (relPath) => services.snapshots.diff(workspace.requireRoot(), relPath),
+      "diff:revert": async (relPath) => {
+        await services.snapshots.revert(workspace.requireRoot(), relPath);
+        bridge.emit("watch:event", { changed: true });
+      },
+      "diff:list-edits": () => (workspace.root ? services.snapshots.listEdits(workspace.root) : []),
 
-  ipcMain.handle(IPC.WriteFile, (_e, relPath: string, content: string) =>
-    writeFileEntry(relPath, content),
-  );
+      // ---------- watcher ----------
+      "watch:start": () => {
+        if (workspace.root) watcher.start(workspace.root, () => bridge.emit("watch:event", { changed: true }));
+      },
+      "watch:stop": () => watcher.stop(),
 
-  // ---------- settings ----------
-
-  ipcMain.handle(IPC.GetSettings, (): Promise<ProviderSettings> => loadSettings());
-
-  ipcMain.handle(IPC.SaveSettings, (_e, settings: ProviderSettings) =>
-    saveSettings(settings),
-  );
-
-  // ---------- agent ----------
-
-  // Errors carry stable codes; the renderer shows them in the user's language.
-  ipcMain.handle(IPC.AgentSend, async (_e, history: ChatMessage[]) => {
-    const settings = await loadSettings();
-    const workspace = getWorkspacePath();
-    if (!workspace) throw new Error(AGENT_ERROR_CODES.noWorkspace);
-    if (!settings.apiKey && settings.provider !== "ollama") {
-      throw new Error(AGENT_ERROR_CODES.noApiKey);
-    }
-    agentRunner?.cancel();
-    agentRunner = new AgentRunner(settings, workspace, (event: AgentEvent) => send(IPC.AgentEvent, event));
-    await agentRunner.run(history);
-  });
-
-  ipcMain.handle(IPC.AgentCancel, () => {
-    agentRunner?.cancel();
-  });
-
-  // ---------- git / search ----------
-
-  ipcMain.handle(IPC.GetGitInfo, () => {
-    const workspace = getWorkspacePath();
-    return workspace ? getGitInfo(workspace) : Promise.resolve({ isRepo: false, branch: "", dirtyCount: 0 });
-  });
-
-  ipcMain.handle(IPC.WorkspaceSearch, (_e, query: string) => workspaceSearch(query));
-
-  // ---------- sessions ----------
-
-  ipcMain.handle(IPC.SessionList, () => listSessions(app.getPath("userData")));
-
-  ipcMain.handle(IPC.SessionLoad, (_e, id: string) => loadSession(app.getPath("userData"), id));
-
-  ipcMain.handle(IPC.SessionSave, (_e, session: SessionData) =>
-    saveSession(app.getPath("userData"), session),
-  );
-
-  ipcMain.handle(IPC.SessionDelete, (_e, id: string) =>
-    deleteSession(app.getPath("userData"), id),
-  );
-
-  ipcMain.handle(IPC.SessionRename, (_e, id: string, title: string) =>
-    renameSession(app.getPath("userData"), id, title),
-  );
-
-  // ---------- diffs / revert ----------
-
-  ipcMain.handle(IPC.DiffFile, (_e, relPath: string) =>
-    diffFile(app.getPath("userData"), relPath),
-  );
-
-  ipcMain.handle(IPC.RevertFile, (_e, relPath: string) => {
-    const result = revertFile(app.getPath("userData"), relPath);
-    send(IPC.WatchEvent, { changed: true });
-    return result;
-  });
-
-  ipcMain.handle(IPC.ListEdits, () => listEdits(app.getPath("userData")));
-
-  // ---------- watcher ----------
-
-  ipcMain.handle(IPC.WatchStart, () => {
-    const workspace = getWorkspacePath();
-    if (workspace) {
-      watcher.start(workspace, () => send(IPC.WatchEvent, { changed: true }));
-    }
-  });
-
-  ipcMain.handle(IPC.WatchStop, () => watcher.stop());
-
-  // ---------- terminal ----------
-
-  ipcMain.handle(IPC.TerminalCreate, (_e, cwd?: string) => {
-    const { id } = terminalManager.create(cwd ?? getWorkspacePath() ?? undefined);
-    const session = terminalManager.get(id);
-    if (session) {
-      session.pty.onData((data) => send(IPC.TerminalData, id, data));
-      session.pty.onExit(({ exitCode }) => {
-        send(IPC.TerminalExit, id, exitCode);
-        terminalManager.onExit(id);
-      });
-    }
-    return { id };
-  });
-
-  ipcMain.on(IPC.TerminalWrite, (_e, id: string, data: string) =>
-    terminalManager.write(id, data),
-  );
-
-  ipcMain.on(IPC.TerminalResize, (_e, id: string, cols: number, rows: number) =>
-    terminalManager.resize(id, cols, rows),
+      // ---------- terminal ----------
+      "term:create": (cwd) => {
+        const session = terminals.create(cwd ?? workspace.root ?? undefined);
+        session.pty.onData((data) => bridge.emit("term:data", session.id, data));
+        session.pty.onExit(({ exitCode }) => {
+          bridge.emit("term:exit", session.id, exitCode);
+          terminals.onExit(session.id);
+        });
+        return { id: session.id, cwd: session.cwd };
+      },
+    },
+    {
+      "term:write": (id, data) => terminals.write(id, data),
+      "term:resize": (id, cols, rows) => terminals.resize(id, cols, rows),
+    },
   );
 }

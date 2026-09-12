@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type { ProviderSettings } from "../../shared/types";
 import { budgetsFor } from "../core/model-capabilities";
-import { defaultBaseUrl, isProviderId } from "../core/providers";
+import { PROVIDER_INFO } from "../../shared/providers";
 import type {
   AdapterEvent,
   AgentAdapter,
@@ -164,11 +164,10 @@ class OpenAICompatAdapter implements AgentAdapter {
     onEvent: (event: AdapterEvent) => void;
     signal: AbortSignal;
   }): Promise<void> {
-    const provider = this.settings.provider;
     const client = new OpenAI({
-      // Ollama ignores the key, but the SDK refuses an empty one.
-      apiKey: this.settings.apiKey || "ollama",
-      baseURL: this.settings.baseUrl || (isProviderId(provider) ? defaultBaseUrl(provider) : undefined),
+      // Keyless providers (Ollama) ignore the key, but the SDK refuses an empty one.
+      apiKey: this.settings.apiKey || "not-required",
+      baseURL: this.settings.baseUrl || PROVIDER_INFO[this.settings.provider]?.defaultBaseUrl,
     });
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

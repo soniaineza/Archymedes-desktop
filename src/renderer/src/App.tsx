@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileNode, ProviderSettings } from "@shared/types";
-import { PROVIDER_LABELS } from "@shared/types";
+import { formatModelLabel, PROVIDER_INFO } from "@shared/providers";
 import { AgentPanel } from "./components/AgentPanel";
 import { CodeEditor } from "./components/CodeEditor";
 import { CommandPalette } from "./components/CommandPalette";
@@ -102,8 +102,8 @@ export default function App() {
   useEffect(() => writeStored("archymedes.terminal-collapsed", String(terminalCollapsed)), [terminalCollapsed]);
 
   const applySettingsSummary = useCallback((s: ProviderSettings) => {
-    setHasKey(Boolean(s.apiKey) || s.provider === "ollama");
-    setModelLabel(`${PROVIDER_LABELS[s.provider] ?? s.provider} · ${s.model}`);
+    setHasKey(Boolean(s.apiKey) || PROVIDER_INFO[s.provider]?.requiresApiKey === false);
+    setModelLabel(formatModelLabel(s));
   }, []);
 
   useEffect(() => {

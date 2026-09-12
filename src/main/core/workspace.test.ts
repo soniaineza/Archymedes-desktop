@@ -26,6 +26,26 @@ afterEach(async () => {
 });
 
 describe("realPathWithin", () => {
+  it("accepts paths inside a root that is itself reached through a symlink", async () => {
+    await fs.writeFile(path.join(root, "a.txt"), "hi");
+    const linkedRoot = path.join(outside, "linked-root");
+    await fs.symlink(root, linkedRoot);
+    await expect(realPathWithin(linkedRoot, "a.txt")).resolves.toBe(await fs.realpath(path.join(root, "a.txt")));
+  });
+
+  it("refuses a not-yet-existing path whose existing ancestor escapes through a symlink", async () => {
+    await fs.symlink(outside, path.join(root, "out-link"));
+    await expect(realPathWithin(root, "out-link/new/deep/evil.txt")).rejects.toThrow(WorkspaceViolation);
+  });
+
+  it("allows a not-yet-existing path under a real directory", async () => {
+    await expect(realPathWithin(root, "new/deep/file.txt")).resolves.toBe(path.join(root, "new/deep/file.txt"));
+  });
+
+  it("does not mistake a name that starts with two dots for an escape", async () => {
+    await expect(realPathWithin(root, "..hidden")).resolves.toBe(path.join(root, "..hidden"));
+  });
+
   it("resolves a plain relative path inside the root", async () => {
     await fs.writeFile(path.join(root, "a.txt"), "hi");
     const resolved = await realPathWithin(root, "a.txt");

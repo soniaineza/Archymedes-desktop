@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_WORKSPACE_LIMITS } from "./core/workspace";
 
 /**
  * A workspace watcher with debounce. fs.watch is noisy (one event per write
@@ -8,7 +9,7 @@ import path from "node:path";
  */
 
 const DEBOUNCE_MS = 600;
-const SKIP = new Set(["node_modules", ".git", "dist", "out", "build", "target", ".cache", "release"]);
+const SKIP = new Set(DEFAULT_WORKSPACE_LIMITS.ignoredDirectories);
 
 export class WorkspaceWatcher {
   private watcher: fs.FSWatcher | null = null;

@@ -1,98 +1,78 @@
 import { contextBridge, ipcRenderer, webFrame } from "electron";
-import type { ArchymedesApi, AgentEvent } from "../shared/types";
-import { IPC } from "../shared/types";
+import type { IpcRendererEvent } from "electron";
+import type {
+  ArchymedesApi,
+  EventChannel,
+  InvokeArgs,
+  InvokeChannel,
+  InvokeResult,
+  IpcEventMap,
+  IpcSendMap,
+  SendChannel,
+} from "../shared/ipc-contract";
 
 /**
- * The only bridge between the sandboxed renderer and the main process.
- * Exposes a narrow, typed API; nothing else crosses the boundary.
+ * The only bridge between the renderer and the main process. Every call goes
+ * through the typed contract in shared/ipc-contract.ts; nothing else crosses.
  */
 
+function invoke<K extends InvokeChannel>(channel: K, ...args: InvokeArgs<K>): Promise<InvokeResult<K>> {
+  return ipcRenderer.invoke(channel, ...args);
+}
+
+function send<K extends SendChannel>(channel: K, ...args: IpcSendMap[K]): void {
+  ipcRenderer.send(channel, ...args);
+}
+
+function subscribe<K extends EventChannel>(channel: K, handler: (...payload: IpcEventMap[K]) => void): () => void {
+  const listener = (_event: IpcRendererEvent, ...payload: unknown[]) => handler(...(payload as IpcEventMap[K]));
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
+
 const api: ArchymedesApi = {
-  // window
   setZoomFactor: (factor) => {
     if (Number.isFinite(factor) && factor >= 0.5 && factor <= 2) webFrame.setZoomFactor(factor);
   },
 
-  // fs
-  pickWorkspace: (dialogTitle) => ipcRenderer.invoke(IPC.PickWorkspace, dialogTitle),
-  getWorkspace: () => ipcRenderer.invoke(IPC.GetWorkspace),
-  setWorkspace: (p) => ipcRenderer.invoke(IPC.SetWorkspace, p),
-  listDirTree: (p) => ipcRenderer.invoke(IPC.ListDirTree, p),
-  readFile: (p) => ipcRenderer.invoke(IPC.ReadFile, p),
-  writeFile: (p, c) => ipcRenderer.invoke(IPC.WriteFile, p, c),
+  pickWorkspace: (...args) => invoke("fs:pick-workspace", ...args),
+  getWorkspace: () => invoke("fs:get-workspace"),
+  setWorkspace: (...args) => invoke("fs:set-workspace", ...args),
+  listDirTree: (...args) => invoke("fs:list-tree", ...args),
+  readFile: (...args) => invoke("fs:read-file", ...args),
+  writeFile: (...args) => invoke("fs:write-file", ...args),
 
-  // settings
-  getSettings: () => ipcRenderer.invoke(IPC.GetSettings),
-  saveSettings: (s) => ipcRenderer.invoke(IPC.SaveSettings, s),
+  getSettings: () => invoke("settings:get"),
+  saveSettings: (...args) => invoke("settings:save", ...args),
 
-  // agent
-  sendAgentMessage: (history, sessionId) =>
-    ipcRenderer.invoke(IPC.AgentSend, history, sessionId),
-  cancelAgent: () => ipcRenderer.invoke(IPC.AgentCancel),
-  onAgentEvent: (handler) => {
-    const listener = (_e: unknown, event: AgentEvent): void => {
-      handler(event);
-    };
-    ipcRenderer.on(IPC.AgentEvent, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.AgentEvent, listener);
-    };
-  },
+  sendAgentMessage: (...args) => invoke("agent:send", ...args),
+  cancelAgent: () => invoke("agent:cancel"),
+  onAgentEvent: (handler) => subscribe("agent:event", handler),
 
-  // git
-  getGitInfo: () => ipcRenderer.invoke(IPC.GetGitInfo),
+  getGitInfo: () => invoke("git:get-info"),
+  workspaceSearch: (...args) => invoke("search:workspace", ...args),
 
-  // search
-  workspaceSearch: (query) => ipcRenderer.invoke(IPC.WorkspaceSearch, query),
+  listSessions: () => invoke("session:list"),
+  loadSession: (...args) => invoke("session:load", ...args),
+  saveSession: (...args) => invoke("session:save", ...args),
+  deleteSession: (...args) => invoke("session:delete", ...args),
+  renameSession: (...args) => invoke("session:rename", ...args),
 
-  // sessions
-  listSessions: () => ipcRenderer.invoke(IPC.SessionList),
-  loadSession: (id) => ipcRenderer.invoke(IPC.SessionLoad, id),
-  saveSession: (session) => ipcRenderer.invoke(IPC.SessionSave, session),
-  deleteSession: (id) => ipcRenderer.invoke(IPC.SessionDelete, id),
-  renameSession: (id, title) => ipcRenderer.invoke(IPC.SessionRename, id, title),
+  diffFile: (...args) => invoke("diff:file", ...args),
+  revertFile: (...args) => invoke("diff:revert", ...args),
+  listEdits: () => invoke("diff:list-edits"),
 
-  // diffs / revert
-  diffFile: (p) => ipcRenderer.invoke(IPC.DiffFile, p),
-  revertFile: (p) => ipcRenderer.invoke(IPC.RevertFile, p),
-  listEdits: () => ipcRenderer.invoke(IPC.ListEdits),
+  startWatching: () => invoke("watch:start"),
+  stopWatching: () => invoke("watch:stop"),
+  onWatchEvent: (handler) => subscribe("watch:event", handler),
 
-  // watcher
-  startWatching: () => ipcRenderer.invoke(IPC.WatchStart),
-  stopWatching: () => ipcRenderer.invoke(IPC.WatchStop),
-  onWatchEvent: (handler) => {
-    const listener = (_e: unknown, event: { changed: boolean }): void => {
-      handler(event);
-    };
-    ipcRenderer.on(IPC.WatchEvent, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.WatchEvent, listener);
-    };
-  },
-
-  // terminal
-  createTerminal: (cwd) => ipcRenderer.invoke(IPC.TerminalCreate, cwd),
-  terminalWrite: (id, data) => ipcRenderer.send(IPC.TerminalWrite, id, data),
-  terminalResize: (id, cols, rows) =>
-    ipcRenderer.send(IPC.TerminalResize, id, cols, rows),
-  onTerminalData: (handler) => {
-    const listener = (_e: unknown, id: string, data: string): void => {
-      handler(id, data);
-    };
-    ipcRenderer.on(IPC.TerminalData, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.TerminalData, listener);
-    };
-  },
-  onTerminalExit: (handler) => {
-    const listener = (_e: unknown, id: string, code: number): void => {
-      handler(id, code);
-    };
-    ipcRenderer.on(IPC.TerminalExit, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.TerminalExit, listener);
-    };
-  },
+  createTerminal: (...args) => invoke("term:create", ...args),
+  terminalWrite: (...args) => send("term:write", ...args),
+  terminalResize: (...args) => send("term:resize", ...args),
+  onTerminalData: (handler) => subscribe("term:data", handler),
+  onTerminalExit: (handler) => subscribe("term:exit", handler),
 };
 
 contextBridge.exposeInMainWorld("archymedes", api);

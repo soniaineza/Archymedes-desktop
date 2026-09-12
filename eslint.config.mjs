@@ -16,6 +16,7 @@ export default tseslint.config(
     // React 18, where "ref mirrors latest prop" and "derive state from an
     // effect" are standard, safe idioms. Keep just the two classic rules.
     files: ["src/renderer/**/*.{ts,tsx}"],
+    ignores: ["src/renderer/test/**"],
     plugins: { "react-hooks": reactHooks, "react-refresh": reactRefresh },
     rules: {
       "react-hooks/rules-of-hooks": "error",

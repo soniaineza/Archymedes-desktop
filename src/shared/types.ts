@@ -3,6 +3,12 @@
  * Kept dependency-free so all three builds can import it.
  */
 
+import type { AppErrorCode, AppErrorParams } from "./app-error";
+import { PROVIDER_INFO } from "./providers";
+import type { ProviderId } from "./providers";
+
+export type { ProviderId } from "./providers";
+
 // ---------- Filesystem / workspace ----------
 
 export interface FileNode {
@@ -66,50 +72,9 @@ export interface ProviderSettings {
   responseLanguage: string;
 }
 
-/**
- * The 9 providers the CLI core defines. Everything except Anthropic speaks an
- * OpenAI-compatible endpoint; Ollama needs no key.
- */
-export type ProviderId =
-  | "anthropic" | "openai" | "google" | "xai" | "deepseek"
-  | "mistral" | "groq" | "ollama" | "openai-compatible";
-
-export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google Gemini",
-  xai: "xAI Grok",
-  deepseek: "DeepSeek",
-  mistral: "Mistral",
-  groq: "Groq",
-  ollama: "Ollama",
-  "openai-compatible": "OpenAI-compatible",
-};
-
-export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string> = {
-  anthropic: "claude-sonnet-5",
-  openai: "gpt-4o",
-  google: "gemini-2.5-pro",
-  xai: "grok-4",
-  deepseek: "deepseek-chat",
-  mistral: "mistral-large-latest",
-  groq: "llama-3.3-70b-versatile",
-  ollama: "llama3.1",
-  "openai-compatible": "gpt-4o-mini",
-};
-
-export const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ProviderId, string>> = {
-  google: "https://generativelanguage.googleapis.com/v1beta/openai",
-  xai: "https://api.x.ai/v1",
-  deepseek: "https://api.deepseek.com",
-  mistral: "https://api.mistral.ai/v1",
-  groq: "https://api.groq.com/openai/v1",
-  ollama: "http://localhost:11434/v1",
-};
-
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   provider: "anthropic",
-  model: "claude-sonnet-5",
+  model: PROVIDER_INFO.anthropic.defaultModel,
   apiKey: "",
   baseUrl: "",
   maxIterations: 40,
@@ -131,14 +96,6 @@ export interface CostInfo {
   /** Unpriced models report unknown rather than zero. */
   unpriced: boolean;
 }
-
-/** Stable error identifiers the renderer translates; the raw message is kept as a fallback. */
-export const AGENT_ERROR_CODES = {
-  noApiKey: "ARCHY_NO_API_KEY",
-  noWorkspace: "ARCHY_NO_WORKSPACE",
-} as const;
-
-export type AgentErrorCode = "iteration-limit";
 
 // ---------- Terminal ----------
 
@@ -210,57 +167,6 @@ export interface EditSummary {
   removed: number;
 }
 
-// ---------- IPC channel names ----------
-
-export const IPC = {
-  // workspace / fs
-  PickWorkspace: "fs:pick-workspace",
-  GetWorkspace: "fs:get-workspace",
-  SetWorkspace: "fs:set-workspace",
-  ListDirTree: "fs:list-tree",
-  ReadFile: "fs:read-file",
-  WriteFile: "fs:write-file",
-
-  // settings
-  GetSettings: "settings:get",
-  SaveSettings: "settings:save",
-
-  // agent
-  AgentSend: "agent:send",
-  AgentCancel: "agent:cancel",
-  AgentEvent: "agent:event",
-
-  // git
-  GetGitInfo: "git:get-info",
-
-  // search
-  WorkspaceSearch: "search:workspace",
-
-  // sessions
-  SessionList: "session:list",
-  SessionLoad: "session:load",
-  SessionSave: "session:save",
-  SessionDelete: "session:delete",
-  SessionRename: "session:rename",
-
-  // diffs / revert
-  DiffFile: "diff:file",
-  RevertFile: "diff:revert",
-  ListEdits: "diff:list-edits",
-
-  // watcher
-  WatchStart: "watch:start",
-  WatchStop: "watch:stop",
-  WatchEvent: "watch:event",
-
-  // terminal
-  TerminalCreate: "term:create",
-  TerminalWrite: "term:write",
-  TerminalResize: "term:resize",
-  TerminalData: "term:data",
-  TerminalExit: "term:exit",
-} as const;
-
 // ---------- Agent event stream (main -> renderer) ----------
 
 export type AgentEvent =
@@ -278,56 +184,6 @@ export type AgentEvent =
   | { type: "message-end"; id: string }
   | { type: "cost"; cost: CostInfo }
   | { type: "done" }
-  | { type: "error"; message: string; code?: AgentErrorCode; params?: Record<string, number> };
+  | { type: "error"; message: string; code?: AppErrorCode; params?: AppErrorParams };
 
-export interface ArchymedesApi {
-  // fs
-  pickWorkspace(dialogTitle?: string): Promise<string | null>;
-  getWorkspace(): Promise<string | null>;
-  setWorkspace(path: string): Promise<void>;
-  listDirTree(path: string): Promise<FileNode[]>;
-  readFile(path: string): Promise<FileEntry>;
-  writeFile(path: string, content: string): Promise<void>;
-
-  // settings
-  getSettings(): Promise<ProviderSettings>;
-  saveSettings(settings: ProviderSettings): Promise<void>;
-
-  // window
-  setZoomFactor(factor: number): void;
-
-  // agent
-  sendAgentMessage(history: ChatMessage[], sessionId?: string): Promise<void>;
-  cancelAgent(): void;
-  onAgentEvent(handler: (event: AgentEvent) => void): () => void;
-
-  // git
-  getGitInfo(): Promise<GitInfo>;
-
-  // search
-  workspaceSearch(query: string): Promise<SearchResult>;
-
-  // sessions
-  listSessions(): Promise<SessionSummary[]>;
-  loadSession(id: string): Promise<SessionData | null>;
-  saveSession(session: SessionData): Promise<void>;
-  deleteSession(id: string): Promise<void>;
-  renameSession(id: string, title: string): Promise<void>;
-
-  // diffs / revert
-  diffFile(path: string): Promise<FileDiff | null>;
-  revertFile(path: string): Promise<void>;
-  listEdits(): Promise<EditSummary[]>;
-
-  // watcher
-  startWatching(): Promise<void>;
-  stopWatching(): Promise<void>;
-  onWatchEvent(handler: (event: { changed: boolean }) => void): () => void;
-
-  // terminal
-  createTerminal(cwd?: string): Promise<TerminalInfo>;
-  terminalWrite(id: string, data: string): void;
-  terminalResize(id: string, cols: number, rows: number): void;
-  onTerminalData(handler: (id: string, data: string) => void): () => void;
-  onTerminalExit(handler: (id: string, code: number) => void): () => void;
-}
+export type { ArchymedesApi } from "./ipc-contract";
