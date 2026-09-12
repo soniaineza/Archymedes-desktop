@@ -26,7 +26,14 @@ export function useAgent() {
   const [status, setStatus] = useState<AgentStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [usage, setUsage] = useState<{ input: number; output: number; formatted?: string; unpriced?: boolean } | null>(null);
+  const [usage, setUsage] = useState<{
+    input: number;
+    output: number;
+    formatted?: string;
+    unpriced?: boolean;
+    contextTokens?: number;
+    contextLimit?: number;
+  } | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
   const [dirtyFlag, setDirtyFlag] = useState(0); // bump to trigger session-list refresh
 
@@ -116,6 +123,8 @@ export function useAgent() {
             output: event.cost.outputTokens,
             formatted: event.cost.formatted,
             unpriced: event.cost.unpriced,
+            contextTokens: event.cost.contextTokens,
+            contextLimit: event.cost.contextLimit,
           });
           break;
         case "done":
@@ -146,7 +155,22 @@ export function useAgent() {
   if (lastStatusRef.current !== "idle" && status === "idle" && queueRef.current.length > 0) {
     const next = queueRef.current[0];
     setQueue(queueRef.current.slice(1));
-    if (next) setTimeout(() => sendRef.current?.(next), 50);
+    if (next) {
+      setTimeout(() => {
+        // Promote the queued placeholder in place (queued → false) rather than
+        // appending a second copy of the same text, then dispatch.
+        setSession((s) => {
+          const idx = s.messages.findIndex((m) => m.queued && m.content === next);
+          const messages =
+            idx >= 0
+              ? s.messages.map((m, i) => (i === idx ? { ...m, queued: false } : m))
+              : [...s.messages, { id: uid("user"), role: "user" as const, content: next }];
+          const promoted: SessionData = { ...s, messages, updatedAt: Date.now() };
+          void dispatch(promoted);
+          return promoted;
+        });
+      }, 50);
+    }
   }
   lastStatusRef.current = status;
 
@@ -172,7 +196,7 @@ export function useAgent() {
         setQueue((q) => [...q, trimmed]);
         setSession((s) => ({
           ...s,
-          messages: [...s.messages, { id: uid("queued"), role: "user" as const, content: `${trimmed}  (queued)` }],
+          messages: [...s.messages, { id: uid("queued"), role: "user" as const, content: trimmed, queued: true }],
         }));
         return;
       }
@@ -185,6 +209,9 @@ export function useAgent() {
           messages: [...s.messages, userMsg],
           updatedAt: Date.now(),
         };
+        // Persist immediately: a crash mid-run shouldn't lose the user's
+        // message (or the auto-titled session) only the agent's reply.
+        void persist(next);
         void dispatch(next);
         return next;
       });
@@ -198,6 +225,9 @@ export function useAgent() {
   }, []);
 
   const reset = useCallback(() => {
+    // /clear during a run must also stop the main-process agent, or its
+    // streamed events would pollute the brand-new session.
+    window.archymedes.cancelAgent();
     setSession(newSession());
     setStatus("idle");
     setError(null);

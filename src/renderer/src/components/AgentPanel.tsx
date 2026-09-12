@@ -54,18 +54,21 @@ function ToolCallView({ name, args, result, isError, onOpenFile, onOpenDiff }: {
 }) {
   const parsedPath = parseArg(args, "path");
   const parsedCmd = parseArg(args, "command");
+  const parsedQuery = parseArg(args, "query") ?? parseArg(args, "pattern");
 
   return (
     <div className={`tool-call${isError ? " error" : ""}`}>
       <div className="tool-name">
         <span className="glyph">{isError ? "✗" : result ? "✓" : "⏳"}</span>
         <span className="name">{name}</span>
-        {(parsedPath || parsedCmd) && <span className="target">{parsedPath ?? parsedCmd}</span>}
+        {(parsedPath || parsedCmd || parsedQuery) && (
+          <span className="target">{parsedPath ?? parsedCmd ?? parsedQuery}</span>
+        )}
       </div>
-      {parsedPath && name === "read_file" && (
+      {parsedPath && name !== "write_file" && name !== "edit_file" && (
         <button className="open-file-btn" onClick={() => onOpenFile(parsedPath!)}>open ↗</button>
       )}
-      {parsedPath && name === "write_file" && (
+      {parsedPath && (name === "write_file" || name === "edit_file") && (
         <span className="tool-links">
           <button className="open-file-btn" onClick={() => onOpenFile(parsedPath!)}>open ↗</button>
           <button className="open-file-btn diff" onClick={() => onOpenDiff(parsedPath!)}>diff ±</button>
@@ -86,7 +89,10 @@ function MessageView({ msg, onOpenFile, onOpenDiff }: {
       <div className="msg user">
         <div className="prompt-line">
           <span className="chevron">❯</span>
-          <span className="user-text">{msg.content}</span>
+          <span className="user-text">
+            {msg.content}
+            {msg.queued && <span className="queued-chip">queued</span>}
+          </span>
         </div>
       </div>
     );
@@ -126,15 +132,88 @@ function MessageView({ msg, onOpenFile, onOpenDiff }: {
 }
 
 export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree, onOpenSettings }: Props) {
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const busy = agent.status !== "idle" && agent.status !== "error";
+
+  // ----- @file autocomplete -----
+  // Active while the caret sits in a @token; ArrowUp/Down pick, Enter/Tab complete.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const [mentionItems, setMentionItems] = useState<string[]>([]);
+  const [allFiles, setAllFiles] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Pull the workspace file list once the panel mounts and after sends.
+    void window.archymedes.listDirTree("").then((nodes) => {
+      const out: string[] = [];
+      const walk = (list: { kind: string; path: string; children?: unknown[] }[]): void => {
+        for (const n of list) {
+          out.push(n.path);
+          if (n.kind === "dir" && Array.isArray(n.children)) {
+            walk(n.children as typeof list);
+          }
+        }
+      };
+      walk(nodes);
+      setAllFiles(out.slice(0, 2000));
+    });
+  }, [agent.session.messages.length === 0, agent.session.id]);
+
+  useEffect(() => {
+    if (mentionQuery === null) return;
+    const q = mentionQuery.toLowerCase();
+    const scored = allFiles
+      .filter((f) => f.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aStarts = a.toLowerCase().startsWith(q) ? 0 : 1;
+        const bStarts = b.toLowerCase().startsWith(q) ? 0 : 1;
+        return aStarts - bStarts || a.length - b.length || a.localeCompare(b);
+      })
+      .slice(0, 8);
+    setMentionItems(scored);
+    setMentionIdx(0);
+  }, [mentionQuery, allFiles]);
+
+  const refreshMentionState = (text: string, caret: number): void => {
+    const upTo = text.slice(0, caret);
+    const match = /(?:^|\s)@([\w./-]*)$/.exec(upTo);
+    setMentionQuery(match ? match[1] : null);
+  };
+
+  const applyMention = (path: string): void => {
+    const el = composerRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? input.length;
+    const upTo = input.slice(0, caret);
+    const from = upTo.lastIndexOf("@", caret - 1);
+    if (from >= 0) {
+      const next = input.slice(0, from) + "@" + path + input.slice(caret);
+      setInput(next);
+      const pos = from + path.length + 1;
+      setTimeout(() => {
+        el.focus();
+        el.setSelectionRange(pos, pos);
+      }, 0);
+    }
+    setMentionQuery(null);
+  };
+  // ----- end @file autocomplete -----
+
+  // Track whether the user has scrolled away; if so, don't fight them.
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [agent.session.messages, agent.status]);
 
   useEffect(() => {
@@ -159,7 +238,7 @@ export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree
     }
     if (cmd === "/help") {
       agent.pushLocalNotice(
-        `commands:\n${SLASH_COMMANDS.map((c) => `  ${c.cmd.padEnd(12)} ${c.desc}`).join("\n")}\n\nshortcuts:\n  Ctrl+P          quick open file\n  Ctrl+Shift+P    command palette\n  Ctrl+Shift+F    search in files\n  Ctrl+B          toggle sidebar\n  Ctrl+J          toggle terminal\n  Ctrl+\`          focus terminal\n\ncontext:\n  @path/to/file   attach a file to your message`,
+        `commands:\n${SLASH_COMMANDS.map((c) => `  ${c.cmd.padEnd(12)} ${c.desc}`).join("\n")}\n\nshortcuts:\n  Ctrl+P          quick open file  (@ in the box → symbols)\n  Ctrl+1…9        jump to editor tab (9 = last)\n  Ctrl+Shift+P    command palette\n  Ctrl+Shift+F    search in files\n  Ctrl+B          toggle sidebar\n  Ctrl+J          toggle terminal\n  Ctrl+\`          focus terminal\n  Ctrl+K          focus agent input\n\ncontext:\n  @path/to/file   attach a file (or directory) to your message`,
       );
       return true;
     }
@@ -169,6 +248,7 @@ export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree
   const submit = () => {
     const text = input;
     setInput("");
+    setMentionQuery(null);
     if (!text.trim()) return;
     setHistory((h) => [text, ...h].slice(0, 50));
     setHistoryIdx(-1);
@@ -176,6 +256,18 @@ export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree
     agent.send(text);
     onRefreshTree();
   };
+
+  // Ctrl+K focuses the composer from anywhere — the standard agent-chat hop.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        composerRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="agent-panel">
@@ -198,7 +290,7 @@ export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree
         <div className="banner-model">{model}</div>
       </div>
 
-      <div className="agent-messages" ref={scrollRef}>
+      <div className="agent-messages" ref={scrollRef} onScroll={onScroll}>
         {agent.session.messages.length === 0 && !agent.error && !agent.notice && (
           <div className="agent-hint">
             <div className="hint-title">Archymedes</div>
@@ -228,11 +320,53 @@ export function AgentPanel({ agent, model, onOpenFile, onOpenDiff, onRefreshTree
 
       <div className="agent-input">
         <span className={`input-chev${busy ? " busy" : ""}`}>❯</span>
+        {mentionQuery !== null && mentionItems.length > 0 && (
+          <div className="mention-menu">
+            {mentionItems.map((f, i) => (
+              <button
+                key={f}
+                className={`mention-item${i === mentionIdx ? " selected" : ""}`}
+                onMouseEnter={() => setMentionIdx(i)}
+                onClick={() => applyMention(f)}
+              >
+                <span>{f.split("/").pop()}</span>
+                <span className="hint">{f}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
+          ref={composerRef}
           placeholder={busy ? "agent is working — your message will queue" : "message…  @file to attach  /help  ↑ history"}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            refreshMentionState(e.target.value, e.target.selectionStart ?? 0);
+          }}
           onKeyDown={(e) => {
+            // Mention popup captures navigation keys while open.
+            if (mentionQuery !== null && mentionItems.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setMentionIdx((i) => Math.min(i + 1, mentionItems.length - 1));
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionIdx((i) => Math.max(i - 1, 0));
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                applyMention(mentionItems[mentionIdx]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setMentionQuery(null);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();

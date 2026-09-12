@@ -38,7 +38,9 @@ const api: ArchymedesApi = {
   getGitInfo: () => ipcRenderer.invoke(IPC.GetGitInfo),
 
   // search
-  workspaceSearch: (query) => ipcRenderer.invoke(IPC.WorkspaceSearch, query),
+  workspaceSearch: (query, caseSensitive) =>
+    ipcRenderer.invoke(IPC.WorkspaceSearch, query, caseSensitive),
+  workspaceSymbols: (query) => ipcRenderer.invoke(IPC.WorkspaceSymbols, query),
 
   // sessions
   listSessions: () => ipcRenderer.invoke(IPC.SessionList),
@@ -66,7 +68,8 @@ const api: ArchymedesApi = {
   },
 
   // terminal
-  createTerminal: (cwd) => ipcRenderer.invoke(IPC.TerminalCreate, cwd),
+  createTerminal: (cwd, shell) => ipcRenderer.invoke(IPC.TerminalCreate, cwd, shell),
+  killTerminal: (id) => ipcRenderer.send(IPC.TerminalKill, id),
   terminalWrite: (id, data) => ipcRenderer.send(IPC.TerminalWrite, id, data),
   terminalResize: (id, cols, rows) =>
     ipcRenderer.send(IPC.TerminalResize, id, cols, rows),

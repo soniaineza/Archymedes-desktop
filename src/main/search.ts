@@ -48,14 +48,14 @@ async function walk(dir: string, rel: string, out: string[]): Promise<void> {
   }
 }
 
-export async function workspaceSearch(rawQuery: string): Promise<SearchResult> {
+export async function workspaceSearch(rawQuery: string, caseSensitive = false): Promise<SearchResult> {
   const query = rawQuery.trim();
-  if (query.length < 2) return { truncated: false, hits: [] };
+  if (query.length < 2) return { truncated: false, hits: [], caseSensitive };
   const root = resolveInWorkspace("");
   const files: string[] = [];
   await walk(root, "", files);
 
-  const needle = query.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
   const hits: SearchHit[] = [];
   let truncated = false;
 
@@ -87,7 +87,8 @@ export async function workspaceSearch(rawQuery: string): Promise<SearchResult> {
 
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i += 1) {
-      if (lines[i].toLowerCase().includes(needle)) {
+      const haystack = caseSensitive ? lines[i] : lines[i].toLowerCase();
+      if (haystack.includes(needle)) {
         hits.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 160) });
         if (hits.length >= MAX_HITS) {
           truncated = true;
@@ -97,5 +98,5 @@ export async function workspaceSearch(rawQuery: string): Promise<SearchResult> {
     }
   }
 
-  return { truncated, hits };
+  return { truncated, hits, caseSensitive };
 }

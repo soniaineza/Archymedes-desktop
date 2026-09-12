@@ -10,12 +10,22 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult>({ truncated: false, hits: [] });
   const [searching, setSearching] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Escape closes the panel from anywhere while it's open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -25,7 +35,7 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
     }
     setSearching(true);
     debounceRef.current = setTimeout(() => {
-      void window.archymedes.workspaceSearch(query).then((r) => {
+      void window.archymedes.workspaceSearch(query, caseSensitive).then((r) => {
         setResult(r);
         setSearching(false);
       });
@@ -33,7 +43,7 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, caseSensitive]);
 
   // Group hits by file.
   const byFile = new Map<string, SearchResult["hits"]>();
@@ -47,6 +57,10 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
     <div className="search-panel">
       <div className="search-header">
         <span>Search workspace</span>
+        <label className="search-case" title="Match case">
+          <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
+          Aa
+        </label>
         <button className="close" onClick={onClose} title="Close (Esc)">✕</button>
       </div>
       <input

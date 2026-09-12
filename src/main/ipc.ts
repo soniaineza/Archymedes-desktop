@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 import type {
   AgentEvent,
   ChatMessage,
@@ -15,8 +15,10 @@ import {
   writeFileEntry,
 } from "./workspace-store";
 import { loadSettings, saveSettings } from "./settings";
+import { DEFAULT_PROVIDER_SETTINGS } from "../shared/types";
 import { getGitInfo } from "./git";
 import { workspaceSearch } from "./search";
+import { workspaceSymbols } from "./symbols";
 import {
   deleteSession,
   listSessions,
@@ -28,7 +30,6 @@ import { diffFile, revertFile, listEdits } from "./diffs";
 import { WorkspaceWatcher } from "./watcher";
 import { AgentRunner } from "./agent/runner";
 import { TerminalManager } from "./terminal";
-import { app } from "electron";
 
 /**
  * All IPC handlers. The renderer can only do what is exposed here through the
@@ -39,7 +40,6 @@ export function registerIpc(): void {
   const terminalManager = new TerminalManager();
   const watcher = new WorkspaceWatcher();
   let agentRunner: AgentRunner | null = null;
-  let currentSessionId: string | null = null;
 
   const send = (channel: string, ...payload: unknown[]): void => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -95,25 +95,19 @@ export function registerIpc(): void {
     const settings = await loadSettings();
     const workspace = getWorkspacePath();
     if (!workspace) throw new Error("No workspace open");
-    if (!settings.apiKey) {
+    if (!settings.apiKey && settings.provider !== "ollama") {
       throw new Error(
         "No API key configured. Open Settings (the gear icon) and add your provider key.",
       );
     }
-    currentSessionId = sessionId ?? null;
+    void sessionId; // reserved for per-session agent state
     agentRunner?.cancel();
     agentRunner = new AgentRunner(settings, workspace, async (event: AgentEvent) => {
-      // Snapshot a file's previous content the moment the agent writes it,
-      // so diffs/revert are always available.
-      if (event.type === "tool-result") {
-        // tool-result carries no path; snapshots are taken in tools.ts instead.
-      }
       send(IPC.AgentEvent, event);
       // Notify when the run finishes and the window is not focused.
       if (event.type === "status" && event.status === "idle" && !focused()) {
-        const title = currentSessionId ? "Archymedes" : "Archymedes";
         if (Notification.isSupported()) {
-          new Notification({ title, body: "Agent finished — take a look." }).show();
+          new Notification({ title: "Archymedes", body: "Agent finished — take a look." }).show();
         }
       }
     });
@@ -131,7 +125,16 @@ export function registerIpc(): void {
     return workspace ? getGitInfo(workspace) : Promise.resolve({ isRepo: false, branch: "", dirtyCount: 0 });
   });
 
-  ipcMain.handle(IPC.WorkspaceSearch, (_e, query: string) => workspaceSearch(query));
+  ipcMain.handle(IPC.WorkspaceSearch, (_e, query: string, caseSensitive?: boolean) =>
+    workspaceSearch(query, caseSensitive === true),
+  );
+
+  ipcMain.handle(IPC.WorkspaceSymbols, (_e, query: string) => {
+    const workspace = getWorkspacePath();
+    return workspace
+      ? workspaceSymbols(workspace, query)
+      : Promise.resolve({ hits: [], truncated: false });
+  });
 
   // ---------- sessions ----------
 
@@ -178,8 +181,20 @@ export function registerIpc(): void {
 
   // ---------- terminal ----------
 
-  ipcMain.handle(IPC.TerminalCreate, (_e, cwd?: string) => {
-    const { id } = terminalManager.create(cwd ?? getWorkspacePath() ?? undefined);
+  ipcMain.handle(IPC.TerminalCreate, async (_e, cwd?: string, shellOverride?: string) => {
+    // Load settings so the terminal honors the user's shell choice; falls
+    // back to defaults if settings can't be read. The per-tab override wins
+    // over the global Settings value.
+    const settings = await loadSettings().catch(() => DEFAULT_PROVIDER_SETTINGS);
+    const valid = ["default", "powershell", "cmd", "gitbash", "custom"];
+    const override = shellOverride && valid.includes(shellOverride)
+      ? (shellOverride as Parameters<TerminalManager["create"]>[2])
+      : undefined;
+    const { id, warning, shellLabel } = await terminalManager.create(
+      settings,
+      cwd ?? getWorkspacePath() ?? undefined,
+      override,
+    );
     const session = terminalManager.get(id);
     if (session) {
       session.pty.onData((data) => send(IPC.TerminalData, id, data));
@@ -188,8 +203,10 @@ export function registerIpc(): void {
         terminalManager.onExit(id);
       });
     }
-    return { id };
+    return { id, warning, shellLabel };
   });
+
+  ipcMain.on(IPC.TerminalKill, (_e, id: string) => terminalManager.kill(id));
 
   ipcMain.on(IPC.TerminalWrite, (_e, id: string, data: string) =>
     terminalManager.write(id, data),
@@ -198,4 +215,12 @@ export function registerIpc(): void {
   ipcMain.on(IPC.TerminalResize, (_e, id: string, cols: number, rows: number) =>
     terminalManager.resize(id, cols, rows),
   );
+
+  // Kill PTYs and stop the watcher when the app quits; without this, spawned
+  // shells can outlive the window on Windows.
+  app.on("before-quit", () => {
+    terminalManager.disposeAll();
+    watcher.stop();
+    agentRunner?.cancel();
+  });
 }

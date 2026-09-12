@@ -53,32 +53,40 @@ export function resolveInWorkspace(relPath: string): string {
   return abs;
 }
 
-export async function listDirTree(relPath = ""): Promise<FileNode[]> {
+const MAX_TREE_DEPTH = 12;
+
+export async function listDirTree(relPath = "", depth = 0): Promise<FileNode[]> {
   const abs = resolveInWorkspace(relPath);
   const entries = await fs.readdir(abs, { withFileTypes: true });
-  const nodes: FileNode[] = [];
 
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
-    if (entry.isDirectory() && IGNORED_DIRS.has(entry.name)) continue;
-    const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      nodes.push({
-        name: entry.name,
-        path: childRel,
-        kind: "dir",
-        children: await listDirTree(childRel),
-      });
-    } else {
-      nodes.push({ name: entry.name, path: childRel, kind: "file" });
-    }
-  }
+  const childNodes = await Promise.all(
+    entries
+      .filter(
+        (entry) =>
+          !(entry.name.startsWith(".") && entry.name !== ".env.example") &&
+          !(entry.isDirectory() && IGNORED_DIRS.has(entry.name)),
+      )
+      .map(async (entry): Promise<FileNode> => {
+        const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+        if (!entry.isDirectory()) return { name: entry.name, path: childRel, kind: "file" };
+        // Depth-capped so a pathological tree can't stall the renderer.
+        const children = depth < MAX_TREE_DEPTH ? await listDirTree(childRel, depth + 1) : [];
+        return { name: entry.name, path: childRel, kind: "dir", children };
+      }),
+  );
 
-  nodes.sort((a, b) => {
+  childNodes.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    // numeric: true → "v2" sorts before "v10"
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
   });
-  return nodes;
+  return childNodes;
+}
+
+/** A NUL byte in the first 8 KiB means binary — decoding it as UTF-8 only
+ *  produces mojibake in the editor and garbage in model context. */
+function looksBinary(buffer: Buffer): boolean {
+  return buffer.subarray(0, Math.min(buffer.length, 8_192)).includes(0);
 }
 
 export async function readFileEntry(relPath: string) {
@@ -89,13 +97,15 @@ export async function readFileEntry(relPath: string) {
     try {
       const buf = Buffer.alloc(MAX_FILE_BYTES);
       await handle.read(buf, 0, MAX_FILE_BYTES, 0);
+      if (looksBinary(buf)) throw new Error(`${relPath} is a binary file and cannot be opened in the editor.`);
       return { path: relPath, content: buf.toString("utf8"), truncated: true };
     } finally {
       await handle.close();
     }
   }
-  const content = await fs.readFile(abs, "utf8");
-  return { path: relPath, content, truncated: false };
+  const buf = await fs.readFile(abs);
+  if (looksBinary(buf)) throw new Error(`${relPath} is a binary file and cannot be opened in the editor.`);
+  return { path: relPath, content: buf.toString("utf8"), truncated: false };
 }
 
 export async function writeFileEntry(relPath: string, content: string): Promise<void> {

@@ -36,6 +36,8 @@ export interface ChatMessage {
   content: string;
   toolCalls?: ToolCallInfo[];
   pending?: boolean;
+  /** Typed while the agent is busy; never sent to the model in that state. */
+  queued?: boolean;
 }
 
 export type AgentStatus =
@@ -44,6 +46,21 @@ export type AgentStatus =
   | "calling-tool"
   | "awaiting-model"
   | "error";
+
+/** Which shell the integrated terminal spawns. */
+export type TerminalShellChoice = "default" | "powershell" | "cmd" | "gitbash" | "custom";
+
+export const TERMINAL_SHELL_LABELS: Record<TerminalShellChoice, string> = {
+  default: "System default",
+  powershell: "PowerShell",
+  cmd: "Command Prompt (cmd)",
+  gitbash: "Git Bash",
+  custom: "Custom path…",
+};
+
+export const TERMINAL_SHELL_CHOICES: readonly TerminalShellChoice[] = [
+  "default", "powershell", "cmd", "gitbash", "custom",
+];
 
 export interface ProviderSettings {
   /** Which adapter to use. */
@@ -55,6 +72,10 @@ export interface ProviderSettings {
   maxIterations: number;
   /** ISO currency code for cost display (from the CLI's multi-currency ledger). */
   currency: string;
+  /** Shell for the integrated terminal; "default" = platform default. */
+  terminalShell: TerminalShellChoice;
+  /** Executable path used when terminalShell is "custom". */
+  terminalShellPath: string;
 }
 
 /**
@@ -105,6 +126,8 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   baseUrl: "",
   maxIterations: 40,
   currency: "USD",
+  terminalShell: "default",
+  terminalShellPath: "",
 };
 
 /** Running cost accounting, streamed with each model turn. */
@@ -116,6 +139,10 @@ export interface CostInfo {
   formatted: string;
   /** Unpriced models report unknown rather than zero. */
   unpriced: boolean;
+  /** Latest turn's input size — approximates current context usage. */
+  contextTokens?: number;
+  /** Model's context window; undefined when the model is unknown. */
+  contextLimit?: number;
 }
 
 // ---------- Terminal ----------
@@ -123,6 +150,10 @@ export interface CostInfo {
 export interface TerminalInfo {
   id: string;
   cwd: string;
+  /** Set when the requested shell wasn't available and a fallback was used. */
+  warning?: string;
+  /** Short display name of the shell that actually launched ("pwsh", "Git Bash"…). */
+  shellLabel?: string;
 }
 
 // ---------- Git ----------
@@ -141,9 +172,29 @@ export interface SearchHit {
   text: string;
 }
 
+/** A code symbol (function/class/…) found by workspace symbol search. */
+export interface SymbolHit {
+  path: string;
+  line: number;
+  name: string;
+  kind: SymbolKind;
+}
+
+export type SymbolKind =
+  | "function"
+  | "class"
+  | "interface"
+  | "type"
+  | "enum"
+  | "struct"
+  | "trait"
+  | "impl";
+
 export interface SearchResult {
   truncated: boolean;
   hits: SearchHit[];
+  /** Lowercased query matched case-insensitively (the historical default). */
+  caseSensitive?: boolean;
 }
 
 // ---------- Sessions ----------
@@ -213,6 +264,7 @@ export const IPC = {
 
   // search
   WorkspaceSearch: "search:workspace",
+  WorkspaceSymbols: "search:symbols",
 
   // sessions
   SessionList: "session:list",
@@ -233,6 +285,7 @@ export const IPC = {
 
   // terminal
   TerminalCreate: "term:create",
+  TerminalKill: "term:kill",
   TerminalWrite: "term:write",
   TerminalResize: "term:resize",
   TerminalData: "term:data",
@@ -280,7 +333,8 @@ export interface ArchymedesApi {
   getGitInfo(): Promise<GitInfo>;
 
   // search
-  workspaceSearch(query: string): Promise<SearchResult>;
+  workspaceSearch(query: string, caseSensitive?: boolean): Promise<SearchResult>;
+  workspaceSymbols(query: string): Promise<{ hits: SymbolHit[]; truncated: boolean }>;
 
   // sessions
   listSessions(): Promise<SessionSummary[]>;
@@ -300,7 +354,12 @@ export interface ArchymedesApi {
   onWatchEvent(handler: (event: { changed: boolean }) => void): () => void;
 
   // terminal
-  createTerminal(cwd?: string): Promise<TerminalInfo>;
+  /**
+   * Create a terminal. `shell` overrides the global Settings choice for this
+   * tab only; undefined = use the configured default.
+   */
+  createTerminal(cwd?: string, shell?: TerminalShellChoice): Promise<TerminalInfo>;
+  killTerminal(id: string): void;
   terminalWrite(id: string, data: string): void;
   terminalResize(id: string, cols: number, rows: number): void;
   onTerminalData(handler: (id: string, data: string) => void): () => void;

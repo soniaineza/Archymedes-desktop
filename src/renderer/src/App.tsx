@@ -15,6 +15,7 @@ import { Welcome, pushRecent } from "./components/Welcome";
 import { getTheme, applyTheme, cycleTheme, THEMES } from "./lib/theme";
 import type { Theme } from "./lib/theme";
 import { useAgent } from "./lib/useAgent";
+import { useDragSize } from "./lib/useDragSize";
 import type { OpenTab } from "./lib/tabs";
 
 function flattenFiles(nodes: FileNode[], out: string[] = []): string[] {
@@ -38,6 +39,17 @@ export default function App() {
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hasKey, setHasKey] = useState(false);
+
+  // Resizable panes (persisted; double-click a divider to reset). Sizes are
+  // fed to the panes as CSS variables — no prop plumbing through components.
+  const [sidebarWidth, startSidebarDrag, resetSidebar] = useDragSize("archy.sidebarW", 232, 160, 460, "x", 1);
+  const [agentWidth, startAgentDrag, resetAgent] = useDragSize("archy.agentW", 420, 300, 720, "x", -1);
+  const [termHeight, startTermDrag, resetTerm] = useDragSize("archy.termH", 230, 100, 600, "y", -1);
+  const paneVars = {
+    "--sidebar-w": `${sidebarWidth}px`,
+    "--agent-w": `${agentWidth}px`,
+    "--term-h": `${termHeight}px`,
+  } as React.CSSProperties;
   const [model, setModel] = useState("");
   const [theme, setTheme] = useState(getTheme());
 
@@ -152,9 +164,15 @@ export default function App() {
   };
 
   const saveTab = async (path: string, content: string) => {
-    await window.archymedes.writeFile(path, content);
-    setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, content, original: content } : t)));
-    void refreshTree();
+    try {
+      await window.archymedes.writeFile(path, content);
+      setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, content, original: content } : t)));
+      void refreshTree();
+    } catch (err) {
+      // A failed save must surface — silently losing the dirty state in the UI
+      // while the file on disk never changed is the worst outcome.
+      agent.pushLocalError(`Save failed for ${path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const commands: Command[] = useMemo(
@@ -192,6 +210,16 @@ export default function App() {
       } else if (mod && e.key === "`") {
         e.preventDefault();
         document.dispatchEvent(new CustomEvent("focus-terminal"));
+      } else if (mod && e.key >= "1" && e.key <= "9" && !e.shiftKey && !e.altKey) {
+        // Ctrl+1…8 → nth tab; Ctrl+9 → last tab (Chrome/VS Code convention).
+        e.preventDefault();
+        const idx = Number(e.key) - 1;
+        setTabs((ts) => {
+          if (ts.length === 0) return ts;
+          const target = ts[idx === 8 ? ts.length - 1 : Math.min(idx, ts.length - 1)];
+          setActiveTab(target.path);
+          return ts;
+        });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -205,7 +233,7 @@ export default function App() {
   const workspaceName = workspace.split(/[\\/]/).pop() ?? workspace;
 
   return (
-    <div className="app">
+    <div className="app" style={paneVars}>
       <div className="titlebar">
         <span className="logo">▣ ARCHYMEDES</span>
         <span className="workspace-name">{workspace}</span>
@@ -235,6 +263,14 @@ export default function App() {
             onOpenDiff={(p) => setDiffPath(p)}
           />
         )}
+        {sidebarOpen && (
+          <div
+            className="drag-handle-x"
+            onMouseDown={startSidebarDrag}
+            onDoubleClick={resetSidebar}
+            title="Drag to resize · double-click to reset"
+          />
+        )}
 
         <div className="center">
           <CodeEditor
@@ -249,8 +285,26 @@ export default function App() {
             onSave={(p, c) => void saveTab(p, c)}
             onChange={(p, c) => setTabs((ts) => ts.map((t) => (t.path === p ? { ...t, content: c } : t)))}
           />
-          <TerminalPanel workspace={workspace} onFileChange={() => void refreshTree()} />
+          <TerminalPanel
+            workspace={workspace}
+            onFileChange={() => void refreshTree()}
+            resizeHandle={
+              <div
+                className="drag-handle-y"
+                onMouseDown={startTermDrag}
+                onDoubleClick={resetTerm}
+                title="Drag to resize · double-click to reset"
+              />
+            }
+          />
         </div>
+
+        <div
+          className="drag-handle-x"
+          onMouseDown={startAgentDrag}
+          onDoubleClick={resetAgent}
+          title="Drag to resize · double-click to reset"
+        />
 
         <AgentPanel
           agent={agent}
@@ -278,7 +332,7 @@ export default function App() {
         <QuickOpen
           files={flattenFiles(tree)}
           onClose={() => setQuickOpen(false)}
-          onOpen={(p) => void openFile(p)}
+          onOpen={(p, line) => void openFile(p, line)}
         />
       )}
 

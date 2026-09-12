@@ -3,7 +3,14 @@ import type { AgentStatus } from "@shared/types";
 
 interface Props {
   status: AgentStatus;
-  usage: { input: number; output: number; formatted?: string; unpriced?: boolean } | null;
+  usage: {
+    input: number;
+    output: number;
+    formatted?: string;
+    unpriced?: boolean;
+    contextTokens?: number;
+    contextLimit?: number;
+  } | null;
   workspaceName: string;
 }
 
@@ -41,11 +48,32 @@ export function StatusBar({ status, usage, git, workspaceName }: Props & {
 }) {
   const branchPart = git.isRepo ? `⑂ ${git.branch}${git.dirtyCount > 0 ? ` ✎${git.dirtyCount}` : ""}` : "no git";
 
+  // Context fill meter: how much of the model's window the conversation now
+  // occupies. Turns green → yellow → red as it fills.
+  let meter: JSX.Element | null = null;
+  if (usage?.contextTokens && usage.contextLimit && usage.contextLimit > 0) {
+    const pct = Math.min(100, (usage.contextTokens / usage.contextLimit) * 100);
+    const color = pct > 85 ? "var(--red)" : pct > 60 ? "var(--blue)" : "var(--green)";
+    const fmt = (n: number): string => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n));
+    meter = (
+      <span
+        className="seg"
+        title={`~${fmt(usage.contextTokens)} of ${fmt(usage.contextLimit)} context tokens in use`}
+      >
+        <span className="meter-track">
+          <span className="meter-fill" style={{ width: `${pct}%`, background: color }} />
+        </span>
+        {pct.toFixed(0)}%
+      </span>
+    );
+  }
+
   return (
     <div className="statusbar">
       <span className="seg accent-seg">{workspaceName}</span>
       <span className="seg">{branchPart}</span>
       <span className="spacer" />
+      {meter}
       <span className="seg" style={{ color: STATUS_COLORS[status] }}>
         ● {status}
       </span>

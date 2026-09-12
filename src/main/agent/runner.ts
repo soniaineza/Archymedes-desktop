@@ -6,9 +6,11 @@ import { AGENT_TOOLS, executeTool } from "./tools";
 import { createAdapter } from "./adapters";
 import { readFileEntry } from "../workspace-store";
 import { budgetsFor } from "../core/model-capabilities";
+import { listFilesFallback, realPathWithin } from "../core/workspace-bridge";
 import { catalogPricesOf } from "../core/price-lookup";
 import { priceUsage, formatMoney, addMoney, money } from "../core/money";
 import { PROVIDER_INFO } from "../core/providers";
+import { promises as fs } from "node:fs";
 
 /**
  * The tool loop, now driven by the CLI core's accounting model: budgets sized
@@ -31,8 +33,11 @@ function id(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Expand @path mentions in the latest user message into explicit file context. */
-async function expandMentions(turns: RuntimeTurn[]): Promise<void> {
+/**
+ * Expand @path mentions in the latest user message into explicit file context.
+ * Directories are walked and their files attached (bounded), so @src works.
+ */
+async function expandMentions(turns: RuntimeTurn[], workspace: string): Promise<void> {
   const lastUser = [...turns].reverse().find((t) => t.kind === "text" && t.role === "user");
   if (!lastUser || lastUser.kind !== "text") return;
 
@@ -42,8 +47,29 @@ async function expandMentions(turns: RuntimeTurn[]): Promise<void> {
   const parts: string[] = [];
   for (const mention of mentions) {
     try {
-      const entry = await readFileEntry(mention);
-      parts.push(`Contents of @${mention}:\n\n\`\`\`\n${entry.content}\n\`\`\``);
+      const abs = await realPathWithin(workspace, mention);
+      const stat = await fs.stat(abs);
+      if (stat.isDirectory()) {
+        // Walk the directory recursively (heavy dirs skipped) and attach the
+        // first few readable files; one mention of @src pulls the core files in.
+        const walk = await listFilesFallback(workspace, mention === "." ? "" : mention);
+        const files = walk.split("\n").filter((l) => l.length > 0 && !l.endsWith("/"));
+        const capped = files.slice(0, 20);
+        for (const rel of capped) {
+          try {
+            const entry = await readFileEntry(rel);
+            parts.push(`Contents of @${rel} (under @${mention}):\n\n\`\`\`\n${entry.content}\n\`\`\``);
+          } catch {
+            // unreadable file inside the dir: skip it, keep the rest
+          }
+        }
+        if (files.length > capped.length) {
+          parts.push(`(@${mention}: ${files.length} files total; first ${capped.length} attached — use glob_files/grep_files for more)`);
+        }
+      } else {
+        const entry = await readFileEntry(mention);
+        parts.push(`Contents of @${mention}:\n\n\`\`\`\n${entry.content}\n\`\`\``);
+      }
     } catch {
       parts.push(`@${mention}: (file not found or unreadable)`);
     }
@@ -69,15 +95,16 @@ export class AgentRunner {
 
     const adapter = createAdapter(this.settings);
     const turns: RuntimeTurn[] = historyToTurns(history);
-    await expandMentions(turns);
+    await expandMentions(turns, this.workspace);
 
     // Budgets sized from the model's real capabilities (CLI core).
-    const { contextLimit } = budgetsFor(this.settings.model);
-    void contextLimit;
+    const { maxOutputTokens } = budgetsFor(this.settings.model);
 
     // Prices from the dated catalog; unpriced providers report honestly.
     const prices = catalogPricesOf(this.settings.provider, this.settings.model);
+    const { contextLimit } = budgetsFor(this.settings.model);
     const totals = { input: 0, output: 0, cached: 0, cost: money(0, this.settings.currency) };
+    let lastTurnInput = 0;
 
     const emitCost = () => {
       const info: CostInfo = {
@@ -86,6 +113,10 @@ export class AgentRunner {
         cachedInputTokens: totals.cached,
         formatted: formatMoney(totals.cost),
         unpriced: !prices,
+        // The last turn's prompt is the best proxy for current context size:
+        // every turn resends the whole conversation.
+        contextTokens: lastTurnInput > 0 ? lastTurnInput : undefined,
+        contextLimit,
       };
       this.emit({ type: "cost", cost: info });
     };
@@ -111,6 +142,7 @@ export class AgentRunner {
           systemPrompt: SYSTEM_PROMPT,
           turns,
           tools: AGENT_TOOLS,
+          maxOutputTokens,
           signal: this.controller.signal,
           onEvent: (event) => {
             switch (event.type) {
@@ -138,6 +170,7 @@ export class AgentRunner {
                 totals.input += event.inputTokens;
                 totals.output += event.outputTokens;
                 totals.cached += event.cachedInputTokens ?? 0;
+                lastTurnInput = event.inputTokens;
                 if (prices) {
                   const turnCost = priceUsage(
                     {
@@ -180,7 +213,18 @@ export class AgentRunner {
 
         const results: HistoryToolResult[] = [];
         for (const call of calls) {
-          if (this.controller.signal.aborted) break;
+          if (this.controller.signal.aborted) {
+            // Cancelling must not strand the provider's tool_use open: every
+            // call gets a result, even if the answer is "cancelled".
+            results.push({
+              toolCallId: call.toolCallId,
+              name: call.name,
+              args: call.args,
+              result: "Cancelled by user before this tool could run.",
+              isError: true,
+            });
+            continue;
+          }
           const result = await executeTool(call.name, call.args, this.workspace);
           const isError = result.startsWith("Error");
           results.push({

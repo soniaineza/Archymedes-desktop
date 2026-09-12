@@ -8,10 +8,14 @@ interface Props {
   onOpenFile: (path: string) => void;
 }
 
+/** Reverts at or above this many changed lines ask for confirmation first. */
+const CONFIRM_THRESHOLD = 40;
+
 export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(true);
   const [reverting, setReverting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -20,6 +24,18 @@ export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
       setLoading(false);
     });
   }, [path]);
+
+  // Escape closes the modal (unless a revert or confirmation is in flight).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !reverting && !confirming) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, reverting, confirming]);
+
+  const changed = diff ? diff.added + diff.removed : 0;
+  const needsConfirm = changed >= CONFIRM_THRESHOLD;
 
   const revert = async () => {
     setReverting(true);
@@ -32,8 +48,16 @@ export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
     }
   };
 
+  const onRevertClick = () => {
+    if (needsConfirm && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    void revert();
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => !confirming && onClose()}>
       <div className="modal diff-modal" onClick={(e) => e.stopPropagation()}>
         <div className="diff-header">
           <div>
@@ -48,12 +72,31 @@ export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
           </div>
           <div className="diff-actions">
             <button className="ghost" onClick={() => onOpenFile(path)}>open file</button>
-            <button className="danger" onClick={() => void revert()} disabled={reverting || !diff || (diff.added === 0 && diff.removed === 0)}>
+            <button
+              className="danger"
+              onClick={onRevertClick}
+              disabled={reverting || !diff || changed === 0}
+            >
               revert
             </button>
             <button className="ghost" onClick={onClose}>close</button>
           </div>
         </div>
+
+        {confirming && (
+          <div className="revert-confirm" role="alertdialog">
+            <span>
+              Revert <b>{changed}</b> changed line{changed === 1 ? "" : "s"} in{" "}
+              <b>{path.split("/").pop()}</b>? The agent's edits to this file will be undone.
+            </span>
+            <span className="revert-confirm-actions">
+              <button className="ghost" onClick={() => setConfirming(false)}>cancel</button>
+              <button className="danger" onClick={() => void revert()} disabled={reverting}>
+                {reverting ? "reverting…" : "yes, revert"}
+              </button>
+            </span>
+          </div>
+        )}
 
         {loading && <div className="diff-note">loading diff…</div>}
         {!loading && !diff && (

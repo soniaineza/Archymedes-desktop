@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { OpenTab } from "../lib/tabs";
 import { fileName, isDirty } from "../lib/tabs";
 import { highlightCode } from "./Highlight";
@@ -62,10 +62,12 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Read-only (truncated) files: ignore editing transforms entirely.
+    if (active?.truncated) return;
     const el = e.currentTarget;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
       e.preventDefault();
-      if (active) onSave(active.path, active.content);
+      if (active && !active.truncated) onSave(active.path, active.content);
       return;
     }
 
@@ -151,6 +153,31 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
   const lineCount = active ? active.content.split("\n").length : 0;
   const lang = active ? langOf(active.path) : "text";
 
+  // Highlighting is the most expensive thing on every keystroke: memoize per
+  // file content and skip entirely for truncated reads (where the textarea is
+  // also read-only — editing only the visible half of a file would silently
+  // discard the rest on save).
+  const canEdit = !active?.truncated;
+  const highlighted = useMemo(
+    () => (active && canEdit ? highlightCode(active.content, lang) : null),
+    [active?.path, active?.content, canEdit, lang],
+  );
+
+  // Escape closes the active tab when the editor has focus — quick file-hopping
+  // without reaching for the mouse.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !active) return;
+      const el = taRef.current;
+      if (el && document.activeElement === el) {
+        e.preventDefault();
+        onClose(active.path);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onClose]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div className="tabs">
@@ -187,7 +214,9 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
             </div>
             <div className="editor-stack">
               <div className="editor-highlight" ref={hlRef} aria-hidden>
-                <pre><code>{highlightCode(active.content, lang)}</code></pre>
+                {/* Current-line bar: translated to the caret line, scrolled in sync. */}
+                <div className="current-line-bar" style={{ transform: `translateY(${(cursor.line - 1) * 20.8}px)` }} />
+                <pre><code>{highlighted}</code></pre>
               </div>
               <textarea
                 key={`${active.path}:${activeLine ?? 0}`}
@@ -202,6 +231,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
                 }}
                 className="editor-textarea transparent"
                 value={active.content}
+                readOnly={!canEdit}
                 onChange={(e) => {
                   onChange(active.path, e.target.value);
                   setTimeout(updateCursor, 0);
@@ -216,10 +246,10 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
           </div>
           <div className="editor-status">
             <span>{active.path}</span>
-            {active.truncated && <span>(truncated — highlighting off)</span>}
+            {active.truncated && <span className="truncate-note" title="The file exceeds the editor's 512 KiB read cap. Editing is disabled so the hidden tail can't be lost on save.">(truncated — read-only)</span>}
             {isDirty(active) && <span className="dirty">● unsaved</span>}
             <span className="status-right">{lang} · Ln {cursor.line}, Col {cursor.col} · {lineCount} lines</span>
-            <button onClick={() => onSave(active.path, active.content)} disabled={!isDirty(active)}>
+            <button onClick={() => onSave(active.path, active.content)} disabled={!isDirty(active) || !canEdit}>
               Save Ctrl+S
             </button>
           </div>

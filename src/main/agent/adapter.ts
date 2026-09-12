@@ -60,9 +60,7 @@ export interface HistoryToolResult {
 export type RuntimeTurn =
   | { kind: "text"; role: "user" | "system" | "assistant"; text: string }
   | { kind: "assistant-toolcalls"; text: string; calls: ToolInvocation[] }
-  | { kind: "tool-results"; results: HistoryToolResult[] };
-
-export function historyToTurns(history: ChatMessage[]): RuntimeTurn[] {
+  | { kind: "tool-results"; results: HistoryToolResult[] };export function historyToTurns(history: ChatMessage[]): RuntimeTurn[] {
   const turns: RuntimeTurn[] = [];
   for (const msg of history) {
     if (msg.role === "assistant" && msg.toolCalls?.length) {
@@ -75,21 +73,24 @@ export function historyToTurns(history: ChatMessage[]): RuntimeTurn[] {
           args: tc.args,
         })),
       });
-      for (const tc of msg.toolCalls) {
-        turns.push({
-          kind: "tool-results",
-          results: [
-            {
-              toolCallId: tc.id,
-              name: tc.name,
-              args: tc.args,
-              result: tc.result ?? "(no result)",
-              isError: tc.isError ?? false,
-            },
-          ],
-        });
-      }
+      // Anthropic requires every tool_use to be answered by the immediately
+      // following user turn, so a replayed history emits one tool-results turn
+      // carrying all of a message's results rather than one per call.
+      turns.push({
+        kind: "tool-results",
+        results: msg.toolCalls.map((tc) => ({
+          toolCallId: tc.id,
+          name: tc.name,
+          args: tc.args,
+          result: tc.result ?? "(no result)",
+          isError: tc.isError ?? false,
+        })),
+      });
     } else if (msg.content.trim().length > 0) {
+      // A queued user message is a UI placeholder for text that will be sent
+      // for real once the current run finishes — it must not reach the model
+      // here, or it would be duplicated when the queue drains.
+      if (msg.role === "user" && msg.queued) continue;
       turns.push({ kind: "text", role: msg.role, text: msg.content });
     }
   }
@@ -109,6 +110,8 @@ export interface AgentAdapter {
     systemPrompt: string;
     turns: RuntimeTurn[];
     tools: ToolSchema[];
+    /** Output ceiling for this model, from the capabilities table. */
+    maxOutputTokens?: number;
     onEvent: (event: AdapterEvent) => void;
     signal: AbortSignal;
   }): Promise<void>;

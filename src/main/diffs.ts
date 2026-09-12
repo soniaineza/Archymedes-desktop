@@ -109,19 +109,24 @@ export async function diffFile(
   } catch {
     after = "";
   }
-  const beforeLines = new Set(before.split("\n"));
-  const afterLines = new Set(after.split("\n"));
+
+  // Count from the same LCS walk that renders the diff, so the +/− header
+  // always agrees with the line-by-line view (set-based counting was wrong
+  // whenever a line appeared more than once — think closing braces).
+  const lines = computeDiff(before, after);
   let added = 0;
   let removed = 0;
-  for (const line of afterLines) if (!beforeLines.has(line)) added += 1;
-  for (const line of beforeLines) if (!afterLines.has(line)) removed += 1;
+  for (const line of lines) {
+    if (line.kind === "add") added += 1;
+    else if (line.kind === "del") removed += 1;
+  }
 
   return {
     path: relPath,
     isNew: before === "" && after !== "",
     added,
     removed,
-    lines: computeDiff(before, after),
+    lines,
   };
 }
 

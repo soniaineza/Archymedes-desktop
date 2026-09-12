@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProviderSettings } from "@shared/types";
-import { DEFAULT_PROVIDER_SETTINGS, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DEFAULT_BASE_URLS } from "@shared/types";
-import type { ProviderId } from "@shared/types";
+import { DEFAULT_PROVIDER_SETTINGS, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DEFAULT_BASE_URLS, TERMINAL_SHELL_LABELS, TERMINAL_SHELL_CHOICES } from "@shared/types";
+import type { ProviderId, TerminalShellChoice } from "@shared/types";
 import { THEMES, getTheme, applyTheme } from "../lib/theme";
 import type { Theme } from "../lib/theme";
 
@@ -131,6 +131,38 @@ export function SettingsModal({ onClose, onSaved }: Props) {
           />
           <div className="hint">The CLI's own default is 100; lower values bound long tasks sooner.</div>
         </div>
+
+        <h2>Terminal</h2>
+
+        <div className="field">
+          <label>Shell</label>
+          <select
+            value={settings.terminalShell ?? "default"}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, terminalShell: e.target.value as TerminalShellChoice }))
+            }
+          >
+            {TERMINAL_SHELL_CHOICES.map((id) => (
+              <option key={id} value={id}>{TERMINAL_SHELL_LABELS[id]}</option>
+            ))}
+          </select>
+          <div className="hint">
+            Default shell for new terminal tabs — each tab's ＋ menu can override it. If a shell
+            isn't installed (e.g. Git Bash), the tab falls back to PowerShell and says so.
+          </div>
+        </div>
+
+        {settings.terminalShell === "custom" && (
+          <div className="field">
+            <label>Shell executable path</label>
+            <input
+              value={settings.terminalShellPath ?? ""}
+              onChange={(e) => setSettings((s) => ({ ...s, terminalShellPath: e.target.value }))}
+              placeholder={process.platform === "win32" ? "C:\\Windows\\System32\\cmd.exe" : "/bin/zsh"}
+            />
+            <div className="hint">Full path to any executable. Must exist at terminal creation.</div>
+          </div>
+        )}
 
         <div className="hint">
           Your key is stored locally and only sent to the provider endpoint above. It is stripped from

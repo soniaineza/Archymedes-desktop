@@ -26,6 +26,7 @@ class AnthropicAdapter implements AgentAdapter {
     systemPrompt: string;
     turns: RuntimeTurn[];
     tools: ToolSchema[];
+    maxOutputTokens?: number;
     onEvent: (event: AdapterEvent) => void;
     signal: AbortSignal;
   }): Promise<void> {
@@ -74,7 +75,9 @@ class AnthropicAdapter implements AgentAdapter {
 
     const stream = client.messages.stream({
       model: this.settings.model,
-      max_tokens: 8192,
+      // Sized from the model's real capabilities (runner passes the budget);
+      // 8192 was a blind ceiling that shortchanged large rewrites.
+      max_tokens: input.maxOutputTokens ?? 8192,
       system: input.systemPrompt,
       messages,
       tools: input.tools.map((t) => ({
@@ -145,6 +148,7 @@ class OpenAICompatAdapter implements AgentAdapter {
     systemPrompt: string;
     turns: RuntimeTurn[];
     tools: ToolSchema[];
+    maxOutputTokens?: number;
     onEvent: (event: AdapterEvent) => void;
     signal: AbortSignal;
   }): Promise<void> {
@@ -190,6 +194,9 @@ class OpenAICompatAdapter implements AgentAdapter {
       messages,
       stream: true,
       stream_options: { include_usage: true },
+      // OpenAI-compat hosts vary in what they accept; only send the ceiling
+      // when the caller derived one from the model capabilities table.
+      ...(input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
       tools: input.tools.map((t) => ({
         type: "function" as const,
         function: {
@@ -208,7 +215,24 @@ class OpenAICompatAdapter implements AgentAdapter {
     let finished = false;
 
     for await (const chunk of stream) {
-      if (input.signal.aborted) break;
+      if (input.signal.aborted) {
+        // A tool call that was mid-stream when the user hit Stop is flushed as
+        // a partial invocation; the runner then feeds a cancelled result back
+        // so the next request's tool_calls/tool messages stay paired.
+        if (toolAccum.size > 0) {
+          for (const [, call] of [...toolAccum.entries()].sort((a, b) => a[0] - b[0])) {
+            input.onEvent({
+              type: "tool-call",
+              invocation: {
+                toolCallId: call.id || `call_${Math.random().toString(36).slice(2)}`,
+                name: call.name,
+                args: call.args || "{}",
+              },
+            });
+          }
+        }
+        break;
+      }
 
       const choice = chunk.choices[0];
       if (choice?.delta?.content) {
