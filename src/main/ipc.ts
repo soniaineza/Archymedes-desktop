@@ -1,226 +1,100 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
-import type {
-  AgentEvent,
-  ChatMessage,
-  FileNode,
-  ProviderSettings,
-  SessionData,
-} from "../shared/types";
-import { IPC } from "../shared/types";
-import {
-  getWorkspacePath,
-  listDirTree,
-  readFileEntry,
-  setWorkspacePath,
-  writeFileEntry,
-} from "./workspace-store";
-import { loadSettings, saveSettings } from "./settings";
-import { DEFAULT_PROVIDER_SETTINGS } from "../shared/types";
+import { AppError } from "../shared/app-error";
+import { PROVIDER_INFO } from "../shared/providers";
+import { listDirTree, readFileForEditor, writeFileFromEditor } from "./fs-ui";
 import { getGitInfo } from "./git";
+import { registerHandlers } from "./ipc-host";
+import type { HostBridge, IpcHost } from "./ipc-host";
 import { workspaceSearch } from "./search";
-import { workspaceSymbols } from "./symbols";
-import {
-  deleteSession,
-  listSessions,
-  loadSession,
-  renameSession,
-  saveSession,
-} from "./sessions";
-import { diffFile, revertFile, listEdits } from "./diffs";
-import { WorkspaceWatcher } from "./watcher";
-import { AgentRunner } from "./agent/runner";
-import { TerminalManager } from "./terminal";
+import type { AppServices } from "./services";
+import { deleteSession, listSessions, loadSession, renameSession, saveSession } from "./sessions";
+import { loadSettings, saveSettings } from "./settings";
 
 /**
- * All IPC handlers. The renderer can only do what is exposed here through the
- * preload bridge — no direct fs, no direct process access.
+ * Every IPC handler. The renderer can only do what is exposed here through the
+ * preload bridge. Nothing in this module touches Electron directly: the host,
+ * the services and the bridge are all passed in.
  */
+export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBridge): void {
+  const { workspace, agent, watcher, terminals } = services;
+  const { userData } = services.paths;
 
-export function registerIpc(): void {
-  const terminalManager = new TerminalManager();
-  const watcher = new WorkspaceWatcher();
-  let agentRunner: AgentRunner | null = null;
-
-  const send = (channel: string, ...payload: unknown[]): void => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(channel, ...payload);
-    }
+  const switchWorkspace = (next: string | null): void => {
+    if (!workspace.setRoot(next)) return;
+    // A run must never keep writing into a workspace the user has left.
+    agent.cancel();
+    watcher.stop(); // re-started by the renderer for the new workspace
   };
 
-  const focused = (): boolean =>
-    BrowserWindow.getAllWindows().some((w) => w.isFocused());
+  registerHandlers(
+    host,
+    {
+      // ---------- workspace / fs ----------
+      "fs:pick-workspace": async (dialogTitle) => {
+        const picked = await bridge.pickDirectory(dialogTitle?.trim() ? dialogTitle.slice(0, 200) : "Choose a workspace folder");
+        if (picked === null) return null;
+        switchWorkspace(picked);
+        return workspace.root;
+      },
+      "fs:get-workspace": () => workspace.root,
+      "fs:set-workspace": (path) => switchWorkspace(path),
+      "fs:list-tree": (relPath) => listDirTree(workspace.requireRoot(), relPath),
+      "fs:read-file": (relPath) => readFileForEditor(workspace.requireRoot(), relPath),
+      "fs:write-file": (relPath, content) => writeFileFromEditor(workspace.requireRoot(), relPath, content),
 
-  // ---------- workspace / fs ----------
+      // ---------- settings ----------
+      "settings:get": () => loadSettings(userData),
+      "settings:save": (settings) => saveSettings(userData, settings),
 
-  ipcMain.handle(IPC.PickWorkspace, async (e) => {
-    const win = BrowserWindow.fromWebContents(e.sender);
-    if (!win) return null;
-    const result = await dialog.showOpenDialog(win, {
-      properties: ["openDirectory", "createDirectory"],
-      title: "Choose a workspace folder",
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    setWorkspacePath(result.filePaths[0]);
-    watcher.stop(); // re-started by the renderer on workspace change
-    return getWorkspacePath();
-  });
-
-  ipcMain.handle(IPC.GetWorkspace, () => getWorkspacePath());
-
-  ipcMain.handle(IPC.SetWorkspace, (_e, p: string) => {
-    setWorkspacePath(p);
-  });
-
-  ipcMain.handle(IPC.ListDirTree, (_e, relPath: string): Promise<FileNode[]> =>
-    listDirTree(relPath ?? ""),
-  );
-
-  ipcMain.handle(IPC.ReadFile, (_e, relPath: string) => readFileEntry(relPath));
-
-  ipcMain.handle(IPC.WriteFile, (_e, relPath: string, content: string) =>
-    writeFileEntry(relPath, content),
-  );
-
-  // ---------- settings ----------
-
-  ipcMain.handle(IPC.GetSettings, (): Promise<ProviderSettings> => loadSettings());
-
-  ipcMain.handle(IPC.SaveSettings, (_e, settings: ProviderSettings) =>
-    saveSettings(settings),
-  );
-
-  // ---------- agent ----------
-
-  ipcMain.handle(IPC.AgentSend, async (_e, history: ChatMessage[], sessionId?: string) => {
-    const settings = await loadSettings();
-    const workspace = getWorkspacePath();
-    if (!workspace) throw new Error("No workspace open");
-    if (!settings.apiKey && settings.provider !== "ollama") {
-      throw new Error(
-        "No API key configured. Open Settings (the gear icon) and add your provider key.",
-      );
-    }
-    void sessionId; // reserved for per-session agent state
-    agentRunner?.cancel();
-    agentRunner = new AgentRunner(settings, workspace, async (event: AgentEvent) => {
-      send(IPC.AgentEvent, event);
-      // Notify when the run finishes and the window is not focused.
-      if (event.type === "status" && event.status === "idle" && !focused()) {
-        if (Notification.isSupported()) {
-          new Notification({ title: "Archymedes", body: "Agent finished — take a look." }).show();
+      // ---------- agent ----------
+      "agent:send": async (history) => {
+        const root = workspace.requireRoot();
+        const settings = await loadSettings(userData);
+        if (!settings.apiKey && PROVIDER_INFO[settings.provider]?.requiresApiKey !== false) {
+          throw new AppError("no-api-key", `No API key configured for ${settings.provider}`);
         }
-      }
-    });
-    await agentRunner.run(history);
-  });
+        await agent.start(settings, root, history, (event) => bridge.emit("agent:event", event));
+      },
+      "agent:cancel": () => agent.cancel(),
 
-  ipcMain.handle(IPC.AgentCancel, () => {
-    agentRunner?.cancel();
-  });
+      // ---------- git / search ----------
+      "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
+      "search:workspace": (query) => workspaceSearch(workspace.requireRoot(), query),
 
-  // ---------- git / search ----------
+      // ---------- sessions ----------
+      "session:list": () => listSessions(userData),
+      "session:load": (id) => loadSession(userData, id),
+      "session:save": (session) => saveSession(userData, session),
+      "session:delete": (id) => deleteSession(userData, id),
+      "session:rename": (id, title) => renameSession(userData, id, title),
 
-  ipcMain.handle(IPC.GetGitInfo, () => {
-    const workspace = getWorkspacePath();
-    return workspace ? getGitInfo(workspace) : Promise.resolve({ isRepo: false, branch: "", dirtyCount: 0 });
-  });
+      // ---------- diffs / revert ----------
+      "diff:file": (relPath) => services.snapshots.diff(workspace.requireRoot(), relPath),
+      "diff:revert": async (relPath) => {
+        await services.snapshots.revert(workspace.requireRoot(), relPath);
+        bridge.emit("watch:event", { changed: true });
+      },
+      "diff:list-edits": () => (workspace.root ? services.snapshots.listEdits(workspace.root) : []),
 
-  ipcMain.handle(IPC.WorkspaceSearch, (_e, query: string, caseSensitive?: boolean) =>
-    workspaceSearch(query, caseSensitive === true),
+      // ---------- watcher ----------
+      "watch:start": () => {
+        if (workspace.root) watcher.start(workspace.root, () => bridge.emit("watch:event", { changed: true }));
+      },
+      "watch:stop": () => watcher.stop(),
+
+      // ---------- terminal ----------
+      "term:create": (cwd) => {
+        const session = terminals.create(cwd ?? workspace.root ?? undefined);
+        session.pty.onData((data) => bridge.emit("term:data", session.id, data));
+        session.pty.onExit(({ exitCode }) => {
+          bridge.emit("term:exit", session.id, exitCode);
+          terminals.onExit(session.id);
+        });
+        return { id: session.id, cwd: session.cwd };
+      },
+    },
+    {
+      "term:write": (id, data) => terminals.write(id, data),
+      "term:resize": (id, cols, rows) => terminals.resize(id, cols, rows),
+    },
   );
-
-  ipcMain.handle(IPC.WorkspaceSymbols, (_e, query: string) => {
-    const workspace = getWorkspacePath();
-    return workspace
-      ? workspaceSymbols(workspace, query)
-      : Promise.resolve({ hits: [], truncated: false });
-  });
-
-  // ---------- sessions ----------
-
-  ipcMain.handle(IPC.SessionList, () => listSessions(app.getPath("userData")));
-
-  ipcMain.handle(IPC.SessionLoad, (_e, id: string) => loadSession(app.getPath("userData"), id));
-
-  ipcMain.handle(IPC.SessionSave, (_e, session: SessionData) =>
-    saveSession(app.getPath("userData"), session),
-  );
-
-  ipcMain.handle(IPC.SessionDelete, (_e, id: string) =>
-    deleteSession(app.getPath("userData"), id),
-  );
-
-  ipcMain.handle(IPC.SessionRename, (_e, id: string, title: string) =>
-    renameSession(app.getPath("userData"), id, title),
-  );
-
-  // ---------- diffs / revert ----------
-
-  ipcMain.handle(IPC.DiffFile, (_e, relPath: string) =>
-    diffFile(app.getPath("userData"), relPath),
-  );
-
-  ipcMain.handle(IPC.RevertFile, (_e, relPath: string) => {
-    const result = revertFile(app.getPath("userData"), relPath);
-    send(IPC.WatchEvent, { changed: true });
-    return result;
-  });
-
-  ipcMain.handle(IPC.ListEdits, () => listEdits(app.getPath("userData")));
-
-  // ---------- watcher ----------
-
-  ipcMain.handle(IPC.WatchStart, () => {
-    const workspace = getWorkspacePath();
-    if (workspace) {
-      watcher.start(workspace, () => send(IPC.WatchEvent, { changed: true }));
-    }
-  });
-
-  ipcMain.handle(IPC.WatchStop, () => watcher.stop());
-
-  // ---------- terminal ----------
-
-  ipcMain.handle(IPC.TerminalCreate, async (_e, cwd?: string, shellOverride?: string) => {
-    // Load settings so the terminal honors the user's shell choice; falls
-    // back to defaults if settings can't be read. The per-tab override wins
-    // over the global Settings value.
-    const settings = await loadSettings().catch(() => DEFAULT_PROVIDER_SETTINGS);
-    const valid = ["default", "powershell", "cmd", "gitbash", "custom"];
-    const override = shellOverride && valid.includes(shellOverride)
-      ? (shellOverride as Parameters<TerminalManager["create"]>[2])
-      : undefined;
-    const { id, warning, shellLabel } = await terminalManager.create(
-      settings,
-      cwd ?? getWorkspacePath() ?? undefined,
-      override,
-    );
-    const session = terminalManager.get(id);
-    if (session) {
-      session.pty.onData((data) => send(IPC.TerminalData, id, data));
-      session.pty.onExit(({ exitCode }) => {
-        send(IPC.TerminalExit, id, exitCode);
-        terminalManager.onExit(id);
-      });
-    }
-    return { id, warning, shellLabel };
-  });
-
-  ipcMain.on(IPC.TerminalKill, (_e, id: string) => terminalManager.kill(id));
-
-  ipcMain.on(IPC.TerminalWrite, (_e, id: string, data: string) =>
-    terminalManager.write(id, data),
-  );
-
-  ipcMain.on(IPC.TerminalResize, (_e, id: string, cols: number, rows: number) =>
-    terminalManager.resize(id, cols, rows),
-  );
-
-  // Kill PTYs and stop the watcher when the app quits; without this, spawned
-  // shells can outlive the window on Windows.
-  app.on("before-quit", () => {
-    terminalManager.disposeAll();
-    watcher.stop();
-    agentRunner?.cancel();
-  });
 }

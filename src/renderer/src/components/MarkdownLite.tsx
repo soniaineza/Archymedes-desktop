@@ -1,175 +1,197 @@
-import { useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { highlightCode } from "./Highlight";
+import { Icon } from "./Icon";
+import { useI18n } from "../i18n/I18nProvider";
 
 /**
- * Minimal markdown for agent chat: fenced code blocks, inline code, bold,
- * and headings. No dependencies — the output is a list of blocks.
+ * Minimal, dependency-free markdown for agent chat: fenced code, headings,
+ * lists, quotes, rules, inline code, bold, italic and web links. Prose blocks
+ * use dir="auto" so right-to-left and left-to-right replies both read naturally.
  */
 
-type Block =
-  | { kind: "code"; lang: string; code: string }
-  | { kind: "text"; content: string };
+type Block = { kind: "code"; lang: string; code: string } | { kind: "text"; content: string };
 
-export function parseMarkdown(text: string): Block[] {
+function splitFences(text: string): Block[] {
   const blocks: Block[] = [];
-  const fence = /```(\w*)\n([\s\S]*?)(?:```|$)/g;
+  const fence = /```([\w+-]*)[^\n]*\n([\s\S]*?)(?:```|$)/g;
   let last = 0;
   let match: RegExpExecArray | null;
-
   while ((match = fence.exec(text)) !== null) {
-    if (match.index > last) {
-      blocks.push({ kind: "text", content: text.slice(last, match.index) });
-    }
-    blocks.push({ kind: "code", lang: match[1] || "text", code: match[2] });
+    if (match.index > last) blocks.push({ kind: "text", content: text.slice(last, match.index) });
+    blocks.push({ kind: "code", lang: match[1] || "text", code: match[2].replace(/\n$/, "") });
     last = match.index + match[0].length;
   }
-  if (last < text.length) {
-    blocks.push({ kind: "text", content: text.slice(last) });
-  }
+  if (last < text.length) blocks.push({ kind: "text", content: text.slice(last) });
   return blocks;
 }
 
+const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\)|\*[^*\s][^*\n]*\*)/g;
+
 function renderInline(text: string): ReactNode[] {
-  // Split on `inline code`, **bold**, [text](url) and bare URLs; simple and safe.
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)`]+)/g).filter(Boolean);
-  return parts.map((part, i) => {
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      return (
-        <code key={i} style={{ fontFamily: "var(--font-mono)", fontSize: "12px", background: "var(--bg-input)", padding: "1px 4px", borderRadius: 4 }}>
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    // [text](url) — only http(s) targets. target=_blank routes the click
-    // through the main process's window-open handler into the system
-    // browser; the Electron window itself never navigates.
-    const mdLink = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.exec(part);
-    if (mdLink) {
-      return (
-        <a key={i} href={mdLink[2]} target="_blank" rel="noreferrer" className="chat-link" title={mdLink[2]}>
-          {mdLink[1]}
-        </a>
-      );
-    }
-    if (/^https?:\/\/[^\s)`]+$/.test(part)) {
-      return (
-        <a key={i} href={part} target="_blank" rel="noreferrer" className="chat-link">
-          {part}
-        </a>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
+  return text
+    .split(INLINE)
+    .filter(Boolean)
+    .map((part, i) => {
+      if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code key={i} className="inline-code">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      }
+      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(part);
+      if (link) {
+        const [, label, href] = link;
+        if (!/^https?:\/\//i.test(href)) return <span key={i}>{label}</span>;
+        return (
+          <a
+            key={i}
+            href={href}
+            onClick={(e) => {
+              e.preventDefault();
+              window.open(href, "_blank", "noopener");
+            }}
+          >
+            {label}
+          </a>
+        );
+      }
+      if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) {
+        return <em key={i}>{part.slice(1, -1)}</em>;
+      }
+      return <Fragment key={i}>{part}</Fragment>;
+    });
 }
 
-const INLINE_DIFF_VISIBLE = 12;
+function renderProse(content: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
 
-/** A ```diff fenced block: colored +/− lines, collapsed past a threshold. */
-function DiffBlock({ code, lang }: { code: string; lang: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const lines = code.replace(/\n$/, "").split("\n");
-  const changed = lines.filter((l) => l.startsWith("+") || l.startsWith("-")).length;
-  const shown = expanded ? lines : lines.slice(0, INLINE_DIFF_VISIBLE);
-  const hidden = lines.length - shown.length;
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const lines = paragraph;
+    out.push(
+      <p key={out.length} dir="auto">
+        {lines.map((line, i) => (
+          <Fragment key={i}>
+            {i > 0 && <br />}
+            {renderInline(line)}
+          </Fragment>
+        ))}
+      </p>,
+    );
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    const { ordered, items } = list;
+    const children = items.map((item, i) => <li key={i}>{renderInline(item)}</li>);
+    out.push(
+      ordered ? (
+        <ol key={out.length} dir="auto">
+          {children}
+        </ol>
+      ) : (
+        <ul key={out.length} dir="auto">
+          {children}
+        </ul>
+      ),
+    );
+    list = null;
+  };
 
-  return (
-    <div className="code-block diff-block">
-      <div className="code-block-bar">
-        <span>
-          {lang} · <span className="d-add">+{lines.filter((l) => l.startsWith("+")).length}</span>
-          {" "}<span className="d-del">−{lines.filter((l) => l.startsWith("-")).length}</span>
-        </span>
-        <CopyButton text={code} />
-      </div>
-      <pre>
-        <code>
-          {shown.map((line, i) => {
-            const cls = line.startsWith("+")
-              ? "dl-add"
-              : line.startsWith("-")
-                ? "dl-del"
-                : line.startsWith("@@")
-                  ? "dl-hunk"
-                  : "dl-ctx";
-            return (
-              <div key={i} className={`diff-line-inline ${cls}`}>
-                {line || " "}
-              </div>
-            );
-          })}
-        </code>
-      </pre>
-      {hidden > 0 && (
-        <button className="diff-expand" onClick={() => setExpanded(true)}>
-          show {hidden} more line{hidden === 1 ? "" : "s"} ({changed} changed)
-        </button>
-      )}
-      {expanded && lines.length > INLINE_DIFF_VISIBLE && (
-        <button className="diff-expand" onClick={() => setExpanded(false)}>collapse</button>
-      )}
-    </div>
-  );
+  for (const line of content.split("\n")) {
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const quote = /^>\s?(.*)$/.exec(line);
+
+    if (heading) {
+      flushParagraph();
+      flushList();
+      out.push(
+        <div key={out.length} className={`md-heading level-${heading[1].length}`} dir="auto">
+          {renderInline(heading[2])}
+        </div>,
+      );
+    } else if (bullet || numbered) {
+      flushParagraph();
+      const ordered = !bullet;
+      if (list && list.ordered !== ordered) flushList();
+      if (!list) list = { ordered, items: [] };
+      list.items.push((bullet ?? numbered)![1]);
+    } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+      flushParagraph();
+      flushList();
+      out.push(<hr key={out.length} />);
+    } else if (quote) {
+      flushParagraph();
+      flushList();
+      out.push(
+        <blockquote key={out.length} dir="auto">
+          {renderInline(quote[1])}
+        </blockquote>,
+      );
+    } else if (line.trim() === "") {
+      flushParagraph();
+      flushList();
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flushParagraph();
+  flushList();
+  return out;
 }
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text, label }: { text: string; label?: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   return (
     <button
-      className="copy-btn"
+      className={`copy-btn${copied ? " copied" : ""}`}
       onClick={() => {
-        void navigator.clipboard.writeText(text);
+        void navigator.clipboard.writeText(text).then(() => setCopied(true));
       }}
-      title="Copy"
+      title={label ?? t("common.copy")}
     >
-      copy
+      <Icon name={copied ? "check" : "copy"} size={12} />
+      <span>{copied ? t("common.copied") : t("common.copy")}</span>
     </button>
   );
 }
 
 export function MarkdownLite({ text }: { text: string }) {
-  const blocks = parseMarkdown(text);
   return (
     <>
-      {blocks.map((block, i) => {
-        if (block.kind === "code") {
-          if (block.lang === "diff" || block.lang === "patch") {
-            return <DiffBlock key={i} code={block.code} lang={block.lang} />;
-          }
-          return (
-            <div key={i} className="code-block">
-              <div className="code-block-bar">
-                <span>{block.lang}</span>
-                <CopyButton text={block.code} />
-              </div>
-              <pre>
-                <code>{highlightCode(block.code, block.lang)}</code>
-              </pre>
+      {splitFences(text).map((block, i) =>
+        block.kind === "code" ? (
+          <div key={i} className="code-block" dir="ltr">
+            <div className="code-block-bar">
+              <span>{block.lang}</span>
+              <CopyButton text={block.code} />
             </div>
-          );
-        }
-        return (
-          <div key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {block.content.split("\n").map((line, j) =>
-              line.startsWith("### ") ? (
-                <div key={j} style={{ fontWeight: 700, marginTop: 6 }}>{line.slice(4)}</div>
-              ) : line.startsWith("## ") ? (
-                <div key={j} style={{ fontWeight: 700, marginTop: 6 }}>{line.slice(3)}</div>
-              ) : line.startsWith("# ") ? (
-                <div key={j} style={{ fontWeight: 700, marginTop: 6 }}>{line.slice(2)}</div>
-              ) : line.startsWith("- ") ? (
-                <div key={j}>• {renderInline(line.slice(2))}</div>
-              ) : (
-                <div key={j}>{renderInline(line)}</div>
-              ),
-            )}
+            <pre>
+              <code>{highlightCode(block.code, block.lang)}</code>
+            </pre>
           </div>
-        );
-      })}
+        ) : (
+          <Fragment key={i}>{renderProse(block.content)}</Fragment>
+        ),
+      )}
     </>
   );
 }
-
-export { CopyButton };

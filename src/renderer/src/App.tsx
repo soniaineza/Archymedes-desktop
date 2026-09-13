@@ -1,69 +1,115 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FileNode } from "@shared/types";
-import { Sidebar } from "./components/Sidebar";
+import type { FileNode, ProviderSettings } from "@shared/types";
+import { formatModelLabel, PROVIDER_INFO } from "@shared/providers";
 import { AgentPanel } from "./components/AgentPanel";
-import { TerminalPanel } from "./components/TerminalPanel";
-import { SettingsModal } from "./components/SettingsModal";
+import { CodeEditor } from "./components/CodeEditor";
 import { CommandPalette } from "./components/CommandPalette";
 import type { Command } from "./components/CommandPalette";
+import { DiffModal } from "./components/DiffModal";
+import { Icon } from "./components/Icon";
+import { LanguageSelect } from "./components/LanguageSelect";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
-import { DiffModal } from "./components/DiffModal";
+import { SettingsModal } from "./components/SettingsModal";
+import { Sidebar } from "./components/Sidebar";
 import { StatusBar, useGitStatus } from "./components/StatusBar";
-import { CodeEditor } from "./components/CodeEditor";
-import { Welcome, pushRecent } from "./components/Welcome";
-import { getTheme, applyTheme, cycleTheme, THEMES } from "./lib/theme";
+import { TerminalPanel } from "./components/TerminalPanel";
+import { useToast } from "./components/Toasts";
+import { Welcome } from "./components/Welcome";
+import { useI18n } from "./i18n/I18nProvider";
+import { LOCALES } from "./i18n/locales";
+import { flattenFiles } from "./lib/files";
+import { pushRecent } from "./lib/recent";
+import type { OpenTab } from "./lib/tabs";
+import { applyTheme, cycleTheme, getTheme, themeIcon, THEMES, watchSystemTheme } from "./lib/theme";
 import type { Theme } from "./lib/theme";
 import { useAgent } from "./lib/useAgent";
-import { useDragSize } from "./lib/useDragSize";
-import type { OpenTab } from "./lib/tabs";
+import { useResizable } from "./lib/useResizable";
 
-function flattenFiles(nodes: FileNode[], out: string[] = []): string[] {
-  for (const n of nodes) {
-    if (n.kind === "file") out.push(n.path);
-    if (n.children) flattenFiles(n.children, out);
+type Overlay = "settings" | "palette" | "quickOpen" | "search" | null;
+
+function readStored<T>(key: string, parse: (raw: string) => T | undefined, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (parse(raw) ?? fallback);
+  } catch {
+    return fallback;
   }
-  return out;
 }
 
+function writeStored(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // layout preferences are best-effort
+  }
+}
+
+const parseBool = (raw: string) => (raw === "true" ? true : raw === "false" ? false : undefined);
+const parseScale = (raw: string) => {
+  const value = Number(raw);
+  return value >= 0.5 && value <= 2 ? value : undefined;
+};
+
 export default function App() {
+  const { t, shortcut, setPreference } = useI18n();
+  const notify = useToast();
+
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [tree, setTree] = useState<FileNode[]>([]);
   const [tabs, setTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [activeLine, setActiveLine] = useState<number | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [quickOpen, setQuickOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [diffPath, setDiffPath] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [hasKey, setHasKey] = useState(false);
+  const [hasKey, setHasKey] = useState(true);
+  const [modelLabel, setModelLabel] = useState("");
+  const [editTick, setEditTick] = useState(0);
+  const [theme, setTheme] = useState<Theme>(getTheme);
+  const [scale, setScale] = useState(() => readStored("archymedes.scale", parseScale, 1));
+  const [sidebarOpen, setSidebarOpen] = useState(() => readStored("archymedes.sidebar-open", parseBool, true));
+  const [agentOpen, setAgentOpen] = useState(() => readStored("archymedes.agent-open", parseBool, true));
+  const [terminalCollapsed, setTerminalCollapsed] = useState(() =>
+    readStored("archymedes.terminal-collapsed", parseBool, false),
+  );
 
-  // Resizable panes (persisted; double-click a divider to reset). Sizes are
-  // fed to the panes as CSS variables — no prop plumbing through components.
-  const [sidebarWidth, startSidebarDrag, resetSidebar] = useDragSize("archy.sidebarW", 232, 160, 460, "x", 1);
-  const [agentWidth, startAgentDrag, resetAgent] = useDragSize("archy.agentW", 420, 300, 720, "x", -1);
-  const [termHeight, startTermDrag, resetTerm] = useDragSize("archy.termH", 230, 100, 600, "y", -1);
-  const paneVars = {
-    "--sidebar-w": `${sidebarWidth}px`,
-    "--agent-w": `${agentWidth}px`,
-    "--term-h": `${termHeight}px`,
-  } as React.CSSProperties;
-  const [model, setModel] = useState("");
-  const [theme, setTheme] = useState(getTheme());
+  const sidebar = useResizable({ storageKey: "archymedes.size.sidebar", initial: 252, min: 180, max: 520, dock: "start" });
+  const agentPane = useResizable({ storageKey: "archymedes.size.agent", initial: 430, min: 320, max: 820, dock: "end" });
+  const terminal = useResizable({ storageKey: "archymedes.size.terminal", initial: 240, min: 110, max: 720, dock: "bottom" });
+  const resizing = sidebar.dragging || agentPane.dragging || terminal.dragging;
 
-  const setThemeAndApply = (next: Theme) => {
-    applyTheme(next);
-    setTheme(next);
-  };
-  const toggleTheme = () => setThemeAndApply(cycleTheme(theme));
-  const [, setEditTick] = useState(0);
+  const agent = useAgent({
+    onRunFinished: () => {
+      if (!document.hasFocus() && "Notification" in window) {
+        new Notification("Archymedes", { body: t("agent.finished") });
+      }
+    },
+  });
+  const git = useGitStatus(workspace);
   const tabsRef = useRef<OpenTab[]>([]);
   tabsRef.current = tabs;
 
-  const agent = useAgent();
-  const git = useGitStatus(workspace);
+  useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => watchSystemTheme(), []);
+
+  useEffect(() => {
+    window.archymedes.setZoomFactor(scale);
+    writeStored("archymedes.scale", String(scale));
+  }, [scale]);
+
+  useEffect(() => writeStored("archymedes.sidebar-open", String(sidebarOpen)), [sidebarOpen]);
+  useEffect(() => writeStored("archymedes.agent-open", String(agentOpen)), [agentOpen]);
+  useEffect(() => writeStored("archymedes.terminal-collapsed", String(terminalCollapsed)), [terminalCollapsed]);
+
+  const applySettingsSummary = useCallback((s: ProviderSettings) => {
+    setHasKey(Boolean(s.apiKey) || PROVIDER_INFO[s.provider]?.requiresApiKey === false);
+    setModelLabel(formatModelLabel(s));
+  }, []);
+
+  useEffect(() => {
+    void window.archymedes.getWorkspace().then(setWorkspace);
+    void window.archymedes.getSettings().then(applySettingsSummary);
+  }, [applySettingsSummary]);
 
   const refreshTree = useCallback(async () => {
     if (!workspace) return;
@@ -75,15 +121,6 @@ export default function App() {
   }, [workspace]);
 
   useEffect(() => {
-    applyTheme(getTheme());
-    void window.archymedes.getWorkspace().then(setWorkspace);
-    void window.archymedes.getSettings().then((s) => {
-      setHasKey(Boolean(s.apiKey));
-      setModel(`${s.provider} · ${s.model}`);
-    });
-  }, []);
-
-  useEffect(() => {
     void refreshTree();
     if (workspace) void window.archymedes.startWatching();
     return () => {
@@ -91,185 +128,245 @@ export default function App() {
     };
   }, [refreshTree, workspace]);
 
-  // Watcher events: refresh tree, reload clean tabs, bump the edits box.
+  const reloadCleanTab = useCallback((path: string, force = false) => {
+    void window.archymedes
+      .readFile(path)
+      .then((entry) => {
+        setTabs((current) =>
+          current.map((tab) =>
+            tab.path === path && (force || tab.content === tab.original)
+              ? { ...tab, content: entry.content, original: entry.content, truncated: entry.truncated }
+              : tab,
+          ),
+        );
+      })
+      .catch(() => {
+        // file may have been deleted; leave the tab as it is
+      });
+  }, []);
+
+  // Watcher events: refresh the tree, reload unmodified tabs, refresh the edits list.
   useEffect(() => {
-    const off = window.archymedes.onWatchEvent(() => {
+    return window.archymedes.onWatchEvent(() => {
       void refreshTree();
-      setEditTick((t) => t + 1);
-      setTabs((ts) =>
-        ts.map((tab) => {
-          if (tab.content === tab.original) {
-            void window.archymedes.readFile(tab.path).then((entry) => {
-              setTabs((cur) =>
-                cur.map((t) =>
-                  t.path === tab.path && t.content === t.original
-                    ? { ...t, content: entry.content, original: entry.content, truncated: entry.truncated }
-                    : t,
-                ),
-              );
-            });
-          }
-          return tab;
-        }),
-      );
+      setEditTick((n) => n + 1);
+      for (const tab of tabsRef.current) {
+        if (tab.content === tab.original) reloadCleanTab(tab.path);
+      }
     });
-    return off;
-  }, [refreshTree]);
+  }, [refreshTree, reloadCleanTab]);
 
-  const pickWorkspace = async () => {
-    const p = await window.archymedes.pickWorkspace();
-    if (p) {
-      pushRecent(p);
-      setWorkspace(p);
-      setTabs([]);
-      setActiveTab(null);
-      agent.reset();
-    }
-  };
-
-  const openPath = async (p: string) => {
-    await window.archymedes.setWorkspace(p);
-    pushRecent(p);
-    setWorkspace(p);
+  const enterWorkspace = (path: string) => {
+    pushRecent(path);
+    setWorkspace(path);
     setTabs([]);
     setActiveTab(null);
     agent.reset();
   };
 
+  const pickWorkspace = async () => {
+    const path = await window.archymedes.pickWorkspace(t("welcome.openWorkspace").replace(/…$/, ""));
+    if (path) enterWorkspace(path);
+  };
+
+  const openPath = async (path: string) => {
+    try {
+      await window.archymedes.setWorkspace(path);
+      enterWorkspace(path);
+    } catch (err) {
+      notify(t("editor.openFailed", { path, error: err instanceof Error ? err.message : String(err) }), "error");
+    }
+  };
+
   const openFile = async (path: string, line?: number) => {
     setActiveLine(line ?? null);
-    const existing = tabs.find((t) => t.path === path);
-    if (existing) {
+    if (tabsRef.current.some((tab) => tab.path === path)) {
       setActiveTab(path);
       return;
     }
     try {
       const entry = await window.archymedes.readFile(path);
-      setTabs((ts) => [...ts, { path, content: entry.content, original: entry.content, truncated: entry.truncated }]);
+      setTabs((ts) => (ts.some((tab) => tab.path === path) ? ts : [...ts, { path, content: entry.content, original: entry.content, truncated: entry.truncated }]));
       setActiveTab(path);
     } catch (err) {
-      agent.pushLocalError(`Cannot open ${path}: ${err instanceof Error ? err.message : String(err)}`);
+      notify(t("editor.openFailed", { path, error: err instanceof Error ? err.message : String(err) }), "error");
     }
   };
 
   const closeTab = (path: string) => {
-    setTabs((ts) => {
-      const idx = ts.findIndex((t) => t.path === path);
-      const next = ts.filter((t) => t.path !== path);
-      if (activeTab === path) {
-        setActiveTab(next.length ? next[Math.max(0, idx - 1)].path : null);
-      }
-      return next;
-    });
+    const idx = tabs.findIndex((tab) => tab.path === path);
+    const next = tabs.filter((tab) => tab.path !== path);
+    setTabs(next);
+    if (activeTab === path) setActiveTab(next.length ? next[Math.max(0, idx - 1)].path : null);
   };
 
   const saveTab = async (path: string, content: string) => {
     try {
       await window.archymedes.writeFile(path, content);
-      setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, content, original: content } : t)));
+      setTabs((ts) => ts.map((tab) => (tab.path === path ? { ...tab, content, original: content } : tab)));
+      notify(t("editor.saved", { name: path.split("/").pop() ?? path }), "success");
       void refreshTree();
     } catch (err) {
-      // A failed save must surface — silently losing the dirty state in the UI
-      // while the file on disk never changed is the worst outcome.
-      agent.pushLocalError(`Save failed for ${path}: ${err instanceof Error ? err.message : String(err)}`);
+      notify(t("editor.saveFailed", { path, error: err instanceof Error ? err.message : String(err) }), "error");
     }
   };
 
-  const commands: Command[] = useMemo(
-    () => [
-      { id: "quick-open", title: "Quick Open File…", hint: "Ctrl+P", run: () => setQuickOpen(true) },
-      { id: "open-workspace", title: "Open Workspace…", hint: "folder", run: () => void pickWorkspace() },
-      { id: "settings", title: "Settings", hint: "provider, API key", run: () => setSettingsOpen(true) },
-      { id: "search", title: "Search in Files", hint: "Ctrl+Shift+F", run: () => setSearchOpen(true) },
-      { id: "toggle-sidebar", title: "Toggle Sidebar", hint: "Ctrl+B", run: () => setSidebarOpen((o) => !o) },
-      { id: "new-chat", title: "New Agent Chat", hint: "/clear", run: () => agent.reset() },
-      { id: "focus-terminal", title: "Focus Terminal", hint: "Ctrl+`", run: () => document.dispatchEvent(new CustomEvent("focus-terminal")) },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agent],
-  );
+  const toggleSidebar = () => setSidebarOpen((open) => !open);
+  const toggleAgent = () => setAgentOpen((open) => !open);
+  const toggleTerminal = () => setTerminalCollapsed((collapsed) => !collapsed);
+  const focusTerminal = () => {
+    setTerminalCollapsed(false);
+    requestAnimationFrame(() => document.dispatchEvent(new CustomEvent("focus-terminal")));
+  };
 
+  const files = useMemo(() => flattenFiles(tree), [tree]);
+
+  const commands: Command[] = [
+    { id: "quick-open", title: t("cmd.quickOpen"), icon: "search", shortcut: "mod+p", run: () => setOverlay("quickOpen") },
+    { id: "open-workspace", title: t("cmd.openWorkspace"), icon: "folder", run: () => void pickWorkspace() },
+    { id: "search", title: t("cmd.search"), icon: "search", shortcut: "mod+shift+f", run: () => setOverlay("search") },
+    { id: "settings", title: t("cmd.settings"), icon: "settings", shortcut: "mod+,", run: () => setOverlay("settings") },
+    { id: "new-chat", title: t("cmd.newChat"), icon: "plus", run: () => agent.reset() },
+    { id: "toggle-sidebar", title: t("cmd.toggleSidebar"), icon: "panelStart", shortcut: "mod+b", run: toggleSidebar },
+    { id: "toggle-terminal", title: t("cmd.toggleTerminal"), icon: "panelBottom", shortcut: "mod+j", run: toggleTerminal },
+    { id: "toggle-agent", title: t("cmd.toggleAgent"), icon: "panelEnd", shortcut: "mod+alt+b", run: toggleAgent },
+    { id: "focus-terminal", title: t("cmd.focusTerminal"), icon: "terminal", shortcut: "mod+`", run: focusTerminal },
+    ...THEMES.map<Command>((id) => ({
+      id: `theme-${id}`,
+      title: t("cmd.theme", { name: t(`theme.${id}`) }),
+      icon: themeIcon(id),
+      run: () => setTheme(id),
+    })),
+    ...LOCALES.map<Command>((locale) => ({
+      id: `language-${locale.code}`,
+      title: t("cmd.language", { name: locale.name }),
+      icon: "globe",
+      run: () => setPreference(locale.code),
+    })),
+  ];
+
+  // Physical key codes keep shortcuts working on non-Latin keyboard layouts (Arabic, Russian, Hindi…).
   useEffect(() => {
+    if (!workspace) return;
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === "p" && !e.shiftKey) {
-        e.preventDefault();
-        setQuickOpen(true);
-      } else if (mod && e.shiftKey && e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        setPaletteOpen((o) => !o);
-      } else if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        setSearchOpen((o) => !o);
-      } else if (mod && e.key.toLowerCase() === "b") {
-        e.preventDefault();
-        setSidebarOpen((o) => !o);
-      } else if (mod && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        document.dispatchEvent(new CustomEvent("toggle-terminal"));
-      } else if (mod && e.key === "`") {
-        e.preventDefault();
-        document.dispatchEvent(new CustomEvent("focus-terminal"));
-      } else if (mod && e.key >= "1" && e.key <= "9" && !e.shiftKey && !e.altKey) {
-        // Ctrl+1…8 → nth tab; Ctrl+9 → last tab (Chrome/VS Code convention).
-        e.preventDefault();
-        const idx = Number(e.key) - 1;
-        setTabs((ts) => {
-          if (ts.length === 0) return ts;
-          const target = ts[idx === 8 ? ts.length - 1 : Math.min(idx, ts.length - 1)];
-          setActiveTab(target.path);
-          return ts;
-        });
-      }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const handlers: Record<string, (() => void) | undefined> = {
+        KeyP: e.shiftKey ? () => setOverlay((o) => (o === "palette" ? null : "palette")) : () => setOverlay("quickOpen"),
+        KeyF: e.shiftKey ? () => setOverlay((o) => (o === "search" ? null : "search")) : undefined,
+        KeyB: e.altKey ? () => setAgentOpen((open) => !open) : () => setSidebarOpen((open) => !open),
+        KeyJ: () => setTerminalCollapsed((collapsed) => !collapsed),
+        Backquote: () => {
+          setTerminalCollapsed(false);
+          requestAnimationFrame(() => document.dispatchEvent(new CustomEvent("focus-terminal")));
+        },
+        Comma: () => setOverlay("settings"),
+      };
+      const handler = handlers[e.code];
+      if (!handler) return;
+      e.preventDefault();
+      handler();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [workspace]);
 
   if (!workspace) {
-    return <Welcome onPick={() => void pickWorkspace()} onOpenPath={(p) => void openPath(p)} />;
+    return (
+      <Welcome
+        theme={theme}
+        onPick={() => void pickWorkspace()}
+        onOpenPath={(p) => void openPath(p)}
+        onCycleTheme={() => setTheme(cycleTheme(theme))}
+      />
+    );
   }
 
-  const workspaceName = workspace.split(/[\\/]/).pop() ?? workspace;
+  const workspaceName = workspace.split(/[\\/]/).pop() || workspace;
+  const themeName = t(`theme.${theme}`);
 
   return (
-    <div className="app" style={paneVars}>
-      <div className="titlebar">
-        <span className="logo">▣ ARCHYMEDES</span>
-        <span className="workspace-name">{workspace}</span>
+    <div className={`app${resizing ? " resizing" : ""}`}>
+      <header className="titlebar">
+        <div className="titlebar-brand">
+          <Icon name="logo" size={17} />
+          <span className="brand-name">Archymedes</span>
+        </div>
+        <button className="titlebar-workspace" onClick={() => void pickWorkspace()} title={workspace}>
+          <Icon name="folder" size={13} />
+          <bdi>{workspaceName}</bdi>
+          <Icon name="chevronDown" size={11} />
+        </button>
         <span className="spacer" />
         {!hasKey && (
-          <button className="warn-btn" onClick={() => setSettingsOpen(true)}>
-            ⚠ no API key
+          <button className="btn warn small" onClick={() => setOverlay("settings")}>
+            <Icon name="alert" size={13} />
+            {t("titlebar.noApiKey")}
           </button>
         )}
+        <div className="titlebar-group">
+          <button
+            className={`icon-btn${sidebarOpen ? " pressed" : ""}`}
+            onClick={toggleSidebar}
+            aria-pressed={sidebarOpen}
+            title={`${t("titlebar.toggleSidebar")} (${shortcut("mod+b")})`}
+            aria-label={t("titlebar.toggleSidebar")}
+          >
+            <Icon name="panelStart" size={16} flipRtl />
+          </button>
+          <button
+            className={`icon-btn${terminalCollapsed ? "" : " pressed"}`}
+            onClick={toggleTerminal}
+            aria-pressed={!terminalCollapsed}
+            title={`${t("titlebar.toggleTerminal")} (${shortcut("mod+j")})`}
+            aria-label={t("titlebar.toggleTerminal")}
+          >
+            <Icon name="panelBottom" size={16} />
+          </button>
+          <button
+            className={`icon-btn${agentOpen ? " pressed" : ""}`}
+            onClick={toggleAgent}
+            aria-pressed={agentOpen}
+            title={`${t("titlebar.toggleAgent")} (${shortcut("mod+alt+b")})`}
+            aria-label={t("titlebar.toggleAgent")}
+          >
+            <Icon name="panelEnd" size={16} flipRtl />
+          </button>
+        </div>
+        <LanguageSelect compact />
         <button
-          onClick={toggleTheme}
-          title="Cycle theme (also in Settings)"
+          className="icon-btn"
+          onClick={() => setTheme(cycleTheme(theme))}
+          title={t("titlebar.theme", { name: themeName })}
+          aria-label={t("titlebar.theme", { name: themeName })}
         >
-          {THEMES.find((t) => t.id === theme)?.label ?? theme}
+          <Icon name={themeIcon(theme)} size={16} />
         </button>
-        <button onClick={() => void pickWorkspace()}>open…</button>
-        <button onClick={() => setSettingsOpen(true)}>settings</button>
-      </div>
+        <button
+          className="icon-btn"
+          onClick={() => setOverlay("settings")}
+          title={`${t("titlebar.settings")} (${shortcut("mod+,")})`}
+          aria-label={t("titlebar.settings")}
+        >
+          <Icon name="settings" size={16} />
+        </button>
+      </header>
 
       <div className="main">
         {sidebarOpen && (
-          <Sidebar
-            tree={tree}
-            activePath={activeTab}
-            onOpenFile={(p) => void openFile(p)}
-            onOpenSearch={() => setSearchOpen(true)}
-            onOpenDiff={(p) => setDiffPath(p)}
-          />
-        )}
-        {sidebarOpen && (
-          <div
-            className="drag-handle-x"
-            onMouseDown={startSidebarDrag}
-            onDoubleClick={resetSidebar}
-            title="Drag to resize · double-click to reset"
-          />
+          <>
+            <div className="pane sidebar-pane" style={{ width: sidebar.size, minWidth: 180 }}>
+              <Sidebar
+                tree={tree}
+                activePath={activeTab}
+                editTick={editTick}
+                onOpenFile={(p) => void openFile(p)}
+                onOpenSearch={() => setOverlay("search")}
+                onOpenDiff={setDiffPath}
+                onReverted={(p) => reloadCleanTab(p, true)}
+              />
+            </div>
+            <div className="resize-handle vertical" {...sidebar.handleProps} aria-label={t("sidebar.explorer")} />
+          </>
         )}
 
         <div className="center">
@@ -283,85 +380,79 @@ export default function App() {
             }}
             onClose={closeTab}
             onSave={(p, c) => void saveTab(p, c)}
-            onChange={(p, c) => setTabs((ts) => ts.map((t) => (t.path === p ? { ...t, content: c } : t)))}
+            onChange={(p, c) => setTabs((ts) => ts.map((tab) => (tab.path === p ? { ...tab, content: c } : tab)))}
           />
+          {!terminalCollapsed && (
+            <div className="resize-handle horizontal" {...terminal.handleProps} aria-label={t("terminal.title")} />
+          )}
           <TerminalPanel
             workspace={workspace}
+            collapsed={terminalCollapsed}
+            height={terminal.size}
+            onToggleCollapsed={toggleTerminal}
             onFileChange={() => void refreshTree()}
-            resizeHandle={
-              <div
-                className="drag-handle-y"
-                onMouseDown={startTermDrag}
-                onDoubleClick={resetTerm}
-                title="Drag to resize · double-click to reset"
-              />
-            }
           />
         </div>
 
-        <div
-          className="drag-handle-x"
-          onMouseDown={startAgentDrag}
-          onDoubleClick={resetAgent}
-          title="Drag to resize · double-click to reset"
-        />
-
-        <AgentPanel
-          agent={agent}
-          model={model}
-          onOpenFile={(p) => void openFile(p)}
-          onOpenDiff={(p) => setDiffPath(p)}
-          onRefreshTree={() => void refreshTree()}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
+        {agentOpen && (
+          <>
+            <div className="resize-handle vertical" {...agentPane.handleProps} aria-label="Archymedes" />
+            <div className="pane agent-pane" style={{ width: agentPane.size, minWidth: 320 }}>
+              <AgentPanel
+                agent={agent}
+                modelLabel={modelLabel}
+                hasKey={hasKey}
+                files={files}
+                onOpenFile={(p) => void openFile(p)}
+                onOpenDiff={setDiffPath}
+                onOpenSettings={() => setOverlay("settings")}
+              />
+            </div>
+          </>
+        )}
       </div>
 
-      <StatusBar status={agent.status} usage={agent.usage} git={git} workspaceName={workspaceName} />
+      <StatusBar
+        status={agent.status}
+        usage={agent.usage}
+        git={git}
+        workspaceName={workspaceName}
+        onOpenPalette={() => setOverlay("palette")}
+      />
 
-      {searchOpen && (
+      {overlay === "search" && (
         <SearchPanel
           onOpenFile={(p, line) => {
+            setOverlay(null);
             void openFile(p, line);
-            setSearchOpen(false);
           }}
-          onClose={() => setSearchOpen(false)}
+          onClose={() => setOverlay(null)}
         />
       )}
-
-      {quickOpen && (
-        <QuickOpen
-          files={flattenFiles(tree)}
-          onClose={() => setQuickOpen(false)}
-          onOpen={(p, line) => void openFile(p, line)}
+      {overlay === "quickOpen" && <QuickOpen files={files} onClose={() => setOverlay(null)} onOpen={(p) => void openFile(p)} />}
+      {overlay === "palette" && <CommandPalette commands={commands} onClose={() => setOverlay(null)} />}
+      {overlay === "settings" && (
+        <SettingsModal
+          theme={theme}
+          scale={scale}
+          onThemeChange={setTheme}
+          onScaleChange={setScale}
+          onClose={() => setOverlay(null)}
+          onSaved={applySettingsSummary}
         />
       )}
-
       {diffPath && (
         <DiffModal
           path={diffPath}
           onClose={() => setDiffPath(null)}
           onReverted={() => {
+            setEditTick((n) => n + 1);
             void refreshTree();
-            setEditTick((t) => t + 1);
-            void window.archymedes.readFile(diffPath).then((entry) => {
-              setTabs((ts) => ts.map((t) => (t.path === diffPath ? { ...t, content: entry.content, original: entry.content } : t)));
-            });
+            reloadCleanTab(diffPath, true);
           }}
           onOpenFile={(p) => {
             setDiffPath(null);
             void openFile(p);
-          }}
-        />
-      )}
-
-      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
-
-      {settingsOpen && (
-        <SettingsModal
-          onClose={() => setSettingsOpen(false)}
-          onSaved={(s) => {
-            setHasKey(Boolean(s.apiKey));
-            setModel(`${s.provider} · ${s.model}`);
           }}
         />
       )}

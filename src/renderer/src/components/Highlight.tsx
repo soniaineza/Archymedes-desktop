@@ -68,7 +68,7 @@ function tokenizeLine(line: string, lang: string, inBlockComment: boolean): { to
       continue;
     }
     // strings (incl. template literals)
-    const strMatch = /^(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/.exec(rest);
+    const strMatch = /^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/.exec(rest);
     if (strMatch) {
       const isTemplate = strMatch[0].startsWith("`");
       push(strMatch[0], isTemplate ? "tok-template" : "tok-string");

@@ -9,23 +9,25 @@ import {
   writeTextFile,
 } from "../core/workspace-bridge";
 import { runGuardedCommand } from "../core/command";
-import { snapshotBefore } from "../diffs";
-import { app } from "electron";
 
 /**
- * Save a file's current content so diff/revert works, whatever happens after.
- * snapshotBefore handles both cases itself: existing files get their content
- * stored, missing ones get an empty snapshot (the "new file" diff badge).
+ * The agent's hands, backed by the CLI core's workspace boundary: every path is
+ * symlink-checked, reads are line-windowed, edits are exact-string, and
+ * commands run through the bounded executor with policy guards.
  */
-async function snapshotBeforeEdit(_workspace: string, relPath: string): Promise<void> {
-  await snapshotBefore(app.getPath("userData"), relPath);
+
+export interface ToolContext {
+  workspace: string;
+  /** Called before a file is modified, so the edit can be diffed and reverted. */
+  recordSnapshot(relPath: string): Promise<void>;
 }
 
-/**
- * The agent's hands, now backed by the CLI core's workspace boundary: every
- * path is symlink-checked, reads are line-windowed, edits are exact-string,
- * and commands run through the bounded executor with policy guards.
- */
+export interface ToolOutcome {
+  output: string;
+  isError: boolean;
+}
+
+export type ToolExecutor = (name: string, argsJson: string, ctx: ToolContext) => Promise<ToolOutcome>;
 
 const MAX_TOOL_OUTPUT = 16_000;
 
@@ -33,6 +35,9 @@ function cap(text: string): string {
   if (text.length <= MAX_TOOL_OUTPUT) return text;
   return text.slice(0, MAX_TOOL_OUTPUT) + `\n… [output truncated at ${MAX_TOOL_OUTPUT} chars]`;
 }
+
+const ok = (output: string): ToolOutcome => ({ output: cap(output), isError: false });
+const fail = (message: string): ToolOutcome => ({ output: cap(`Error: ${message}`), isError: true });
 
 export const AGENT_TOOLS: ToolSchema[] = [
   {
@@ -119,12 +124,14 @@ export const AGENT_TOOLS: ToolSchema[] = [
   },
 ];
 
-export async function executeTool(name: string, argsJson: string, workspace: string): Promise<string> {
-  let args: Record<string, unknown> = {};
+export const executeTool: ToolExecutor = async (name, argsJson, { workspace, recordSnapshot }) => {
+  let args: Record<string, unknown>;
   try {
-    args = JSON.parse(argsJson || "{}") as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(argsJson || "{}");
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return fail("tool arguments must be a JSON object");
+    args = parsed as Record<string, unknown>;
   } catch {
-    return cap(`Error: tool arguments are not valid JSON: ${argsJson}`);
+    return fail(`tool arguments are not valid JSON: ${argsJson}`);
   }
 
   try {
@@ -137,42 +144,32 @@ export async function executeTool(name: string, argsJson: string, workspace: str
         const header = result.truncated
           ? `${result.path} (lines ${result.startLine}-${result.startLine + result.content.split("\n").length - 1} of ${result.totalLines})\n`
           : "";
-        return cap(header + result.content);
+        return ok(header + result.content);
       }
       case "write_file": {
-        await snapshotBeforeEdit(workspace, String(args.path ?? ""));
+        await recordSnapshot(String(args.path ?? ""));
         const result = await writeTextFile(workspace, String(args.path ?? ""), String(args.content ?? ""));
-        return `Wrote ${result.path} (${result.bytesWritten} bytes).`;
+        return ok(`Wrote ${result.path} (${result.bytesWritten} bytes).`);
       }
       case "edit_file": {
-        await snapshotBeforeEdit(workspace, String(args.path ?? ""));
-        const result = await editTextFile(
-          workspace,
-          String(args.path ?? ""),
-          String(args.oldText ?? ""),
-          String(args.newText ?? ""),
-          { replaceAll: args.replaceAll === true },
-        );
-        return `Edited ${result.path} (${result.replacements} replacement${result.replacements === 1 ? "" : "s"}).`;
+        await recordSnapshot(String(args.path ?? ""));
+        const result = await editTextFile(workspace, String(args.path ?? ""), String(args.oldText ?? ""), String(args.newText ?? ""), {
+          replaceAll: args.replaceAll === true,
+        });
+        return ok(`Edited ${result.path} (${result.replacements} replacement${result.replacements === 1 ? "" : "s"}).`);
       }
-      case "list_dir": {
-        const tree = await listFilesFallback(workspace, String(args.path ?? ""));
-        return cap(tree);
-      }
+      case "list_dir":
+        return ok(await listFilesFallback(workspace, String(args.path ?? "")));
       case "glob_files": {
         const matches = await globWorkspace(workspace, String(args.pattern ?? ""));
-        return cap(matches.length > 0 ? matches.join("\n") : "No files matched.");
+        return ok(matches.length > 0 ? matches.join("\n") : "No files matched.");
       }
       case "grep_files": {
         const matches = await grepWorkspace(workspace, String(args.query ?? ""), {
           include: typeof args.include === "string" ? args.include : undefined,
           regex: args.regex === true,
         });
-        return cap(
-          matches.length > 0
-            ? matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")
-            : "No matches.",
-        );
+        return ok(matches.length > 0 ? matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n") : "No matches.");
       }
       case "run_command": {
         const { exitCode, stdout, stderr } = await runGuardedCommand(String(args.command ?? ""), {
@@ -182,13 +179,14 @@ export async function executeTool(name: string, argsJson: string, workspace: str
         const parts = [`exit code: ${exitCode}`];
         if (stdout.trim()) parts.push(`stdout:\n${stdout}`);
         if (stderr.trim()) parts.push(`stderr:\n${stderr}`);
-        return cap(parts.join("\n"));
+        // A failing command is a normal result the model should read, not a tool error.
+        return ok(parts.join("\n"));
       }
       default:
-        return cap(`Error: unknown tool "${name}"`);
+        return fail(`unknown tool "${name}"`);
     }
   } catch (err) {
-    if (err instanceof WorkspaceViolation) return cap(`Error: ${err.message}`);
-    return cap(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof WorkspaceViolation) return fail(err.message);
+    return fail(err instanceof Error ? err.message : String(err));
   }
-}
+};

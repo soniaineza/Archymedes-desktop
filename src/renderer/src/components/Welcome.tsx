@@ -1,92 +1,107 @@
-import { useEffect, useState } from "react";
-import { HeroCanvas } from "./HeroCanvas";
+import { lazy, Suspense, useState } from "react";
+import { Icon } from "./Icon";
+import { LanguageSelect } from "./LanguageSelect";
+import { useI18n } from "../i18n/I18nProvider";
+import type { MessageKey } from "../i18n/types";
+import { readRecent, removeRecent } from "../lib/recent";
+import { themeIcon } from "../lib/theme";
+import type { Theme } from "../lib/theme";
+
+// three.js is large; load it only for the welcome screen, and never for reduced-motion users.
+const HeroCanvas = lazy(() => import("./HeroCanvas").then((m) => ({ default: m.HeroCanvas })));
 
 interface Props {
+  theme: Theme;
   onPick: () => void;
   onOpenPath: (path: string) => void;
+  onCycleTheme: () => void;
 }
 
-const RECENT_KEY = "archymedes.recent-workspaces";
-
-export function readRecent(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function pushRecent(path: string): void {
-  try {
-    const list = readRecent().filter((p) => p !== path);
-    list.unshift(path);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
-  } catch {
-    // storage unavailable; recents are a nicety, not a requirement
-  }
-}
-
-const STEPS = [
-  { n: "1", title: "Open a folder", desc: "any project on your machine — nothing is uploaded" },
-  { n: "2", title: "Add your API key", desc: "Anthropic, OpenAI, Ollama, OpenRouter, Groq — stored locally" },
-  { n: "3", title: "Just ask", desc: "the agent reads, edits and runs — every edit is diffable and revertible" },
+const STEPS: readonly [MessageKey, MessageKey][] = [
+  ["welcome.step1Title", "welcome.step1Desc"],
+  ["welcome.step2Title", "welcome.step2Desc"],
+  ["welcome.step3Title", "welcome.step3Desc"],
 ];
 
-export function Welcome({ onPick, onOpenPath }: Props) {
-  const [recent, setRecent] = useState<string[]>([]);
-
-  useEffect(() => {
-    setRecent(readRecent());
-  }, []);
+export function Welcome({ theme, onPick, onOpenPath, onCycleTheme }: Props) {
+  const { t, formatNumber } = useI18n();
+  const [recent, setRecent] = useState<string[]>(readRecent);
+  const [animate] = useState(() => !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  const themeName = t(`theme.${theme}`);
 
   return (
     <div className="welcome">
-      <div className="hero-canvas-host" aria-hidden>
-        <HeroCanvas />
+      <div className="welcome-toolbar">
+        <LanguageSelect compact />
+        <button className="btn ghost small" onClick={onCycleTheme} title={t("titlebar.theme", { name: themeName })}>
+          <Icon name={themeIcon(theme)} size={14} />
+          {themeName}
+        </button>
       </div>
 
-      <div className="welcome-content">
-        <div className="wordmark">
-          <span className="mark">▣</span>
-          <h1>ARCHYMEDES</h1>
+      {animate && (
+        <div className="hero-canvas-host" aria-hidden>
+          <Suspense fallback={null}>
+            <HeroCanvas />
+          </Suspense>
         </div>
-        <p className="tagline">a coding agent that lives on your desktop</p>
+      )}
+
+      <main className="welcome-content">
+        <div className="wordmark">
+          <Icon name="logo" size={34} />
+          <h1>Archymedes</h1>
+        </div>
+        <p className="tagline">{t("welcome.tagline")}</p>
 
         <div className="welcome-actions">
-          <button className="primary" onClick={onPick}>
-            Open Workspace…
+          <button className="btn primary large" onClick={onPick} autoFocus>
+            <Icon name="folder" size={16} />
+            {t("welcome.openWorkspace")}
           </button>
         </div>
 
         {recent.length > 0 && (
-          <div className="recent">
-            <div className="recent-label">recent workspaces</div>
-            {recent.map((p) => (
-              <button key={p} className="recent-item" onClick={() => onOpenPath(p)} title={p}>
-                <span className="name">{p.split(/[\\/]/).pop()}</span>
-                <span className="path">{p}</span>
-              </button>
+          <section className="recent" aria-label={t("welcome.recent")}>
+            <div className="section-label">{t("welcome.recent")}</div>
+            {recent.map((path) => (
+              <div key={path} className="recent-item">
+                <button className="recent-open" onClick={() => onOpenPath(path)} title={path}>
+                  <Icon name="folder" size={15} />
+                  <span className="recent-text">
+                    <bdi className="name">{path.split(/[\\/]/).pop()}</bdi>
+                    <bdi className="path" dir="ltr">
+                      {path}
+                    </bdi>
+                  </span>
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => setRecent(removeRecent(path))}
+                  title={t("welcome.removeRecent")}
+                  aria-label={t("welcome.removeRecent")}
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </div>
             ))}
-          </div>
+          </section>
         )}
 
-        <div className="steps">
-          {STEPS.map((s) => (
-            <div key={s.n} className="step">
-              <span className="step-n">{s.n}</span>
+        <ol className="steps">
+          {STEPS.map(([title, desc], i) => (
+            <li key={title} className="step">
+              <span className="step-n">{formatNumber(i + 1)}</span>
               <div>
-                <div className="step-title">{s.title}</div>
-                <div className="step-desc">{s.desc}</div>
+                <div className="step-title">{t(title)}</div>
+                <div className="step-desc">{t(desc)}</div>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
 
-        <div className="welcome-foot">
-          sessions · diff &amp; revert · multi-terminal · search · @file context
-        </div>
-      </div>
+        <div className="welcome-foot">{t("welcome.features")}</div>
+      </main>
     </div>
   );
 }

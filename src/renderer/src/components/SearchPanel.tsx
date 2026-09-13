@@ -1,102 +1,109 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchResult } from "@shared/types";
+import { Icon } from "./Icon";
+import { Modal } from "./Modal";
+import { useI18n } from "../i18n/I18nProvider";
+import { fileKind } from "../lib/files";
 
 interface Props {
   onOpenFile: (path: string, line?: number) => void;
   onClose: () => void;
 }
 
+const EMPTY: SearchResult = { truncated: false, hits: [] };
+
+function highlight(text: string, query: string) {
+  const idx = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark>{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 export function SearchPanel({ onOpenFile, onClose }: Props) {
+  const { t, formatNumber } = useI18n();
   const [query, setQuery] = useState("");
-  const [result, setResult] = useState<SearchResult>({ truncated: false, hits: [] });
+  const [result, setResult] = useState<SearchResult>(EMPTY);
   const [searching, setSearching] = useState(false);
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef(0);
+  const trimmed = query.trim();
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Escape closes the panel from anywhere while it's open.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.trim().length < 2) {
-      setResult({ truncated: false, hits: [] });
+    if (trimmed.length < 2) {
+      setResult(EMPTY);
+      setSearching(false);
       return;
     }
+    const request = ++requestRef.current;
     setSearching(true);
-    debounceRef.current = setTimeout(() => {
-      void window.archymedes.workspaceSearch(query, caseSensitive).then((r) => {
-        setResult(r);
-        setSearching(false);
-      });
+    const timer = setTimeout(() => {
+      window.archymedes
+        .workspaceSearch(query)
+        .then((r) => {
+          if (request === requestRef.current) setResult(r);
+        })
+        .catch(() => {
+          if (request === requestRef.current) setResult(EMPTY);
+        })
+        .finally(() => {
+          if (request === requestRef.current) setSearching(false);
+        });
     }, 250);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [query, caseSensitive]);
+    return () => clearTimeout(timer);
+  }, [query, trimmed]);
 
-  // Group hits by file.
-  const byFile = new Map<string, SearchResult["hits"]>();
-  for (const hit of result.hits) {
-    const list = byFile.get(hit.path) ?? [];
-    list.push(hit);
-    byFile.set(hit.path, list);
-  }
+  const byFile = useMemo(() => {
+    const groups = new Map<string, SearchResult["hits"]>();
+    for (const hit of result.hits) {
+      const list = groups.get(hit.path) ?? [];
+      list.push(hit);
+      groups.set(hit.path, list);
+    }
+    return [...groups.entries()];
+  }, [result]);
 
   return (
-    <div className="search-panel">
-      <div className="search-header">
-        <span>Search workspace</span>
-        <label className="search-case" title="Match case">
-          <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
-          Aa
-        </label>
-        <button className="close" onClick={onClose} title="Close (Esc)">✕</button>
+    <Modal onClose={onClose} position="top" className="palette search-palette" label={t("search.title")}>
+      <div className="palette-search">
+        <Icon name="search" size={15} />
+        <input
+          autoFocus
+          className="palette-input"
+          placeholder={t("search.placeholder")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label={t("search.title")}
+        />
+        {searching && <Icon name="loader" size={14} className="spin" />}
       </div>
-      <input
-        ref={inputRef}
-        className="search-input"
-        placeholder="Find in files…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      <div className="search-results">
-        {searching && <div className="search-note">Searching…</div>}
-        {!searching && query.trim().length >= 2 && result.hits.length === 0 && (
-          <div className="search-note">No results</div>
+      <div className="palette-list search-results" aria-live="polite">
+        {trimmed.length < 2 && <div className="empty-note padded">{t("search.minChars")}</div>}
+        {!searching && trimmed.length >= 2 && result.hits.length === 0 && (
+          <div className="empty-note padded">{t("search.noResults")}</div>
         )}
-        {[...byFile.entries()].map(([filePath, hits]) => (
+        {byFile.map(([filePath, hits]) => (
           <div key={filePath} className="search-file">
-            <div className="search-file-name">{filePath} <span className="count">{hits.length}</span></div>
+            <div className="search-file-name">
+              <Icon name="file" size={13} className={`tree-icon kind-${fileKind(filePath)}`} />
+              <bdi dir="ltr">{filePath}</bdi>
+              <span className="count-badge">{formatNumber(hits.length)}</span>
+            </div>
             {hits.map((hit, i) => (
-              <div
-                key={i}
-                className="search-hit"
-                onClick={() => onOpenFile(filePath, hit.line)}
-              >
+              <button key={i} className="search-hit" dir="ltr" onClick={() => onOpenFile(filePath, hit.line)}>
                 <span className="line">{hit.line}</span>
-                <span className="text">{hit.text}</span>
-              </div>
+                <span className="text">{highlight(hit.text, trimmed)}</span>
+              </button>
             ))}
           </div>
         ))}
         {result.truncated && (
-          <div className="search-note">Results capped at 200 — refine your query.</div>
+          <div className="empty-note padded">{t("search.capped", { count: result.hits.length })}</div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
