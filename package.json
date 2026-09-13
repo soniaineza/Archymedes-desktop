@@ -4,6 +4,7 @@
   "private": true,
   "description": "Archymedes Desktop — an IDE-style desktop client for the Archymedes coding agent.",
   "license": "Apache-2.0",
+  "author": "Archymedes",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -24,11 +25,13 @@
     "directories": {
       "output": "release"
     },
+    "npmRebuild": false,
     "files": [
       "out/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
