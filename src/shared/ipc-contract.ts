@@ -7,6 +7,7 @@ import type {
   FileNode,
   GitInfo,
   ProviderSettings,
+  SymbolHit,
   SearchResult,
   SessionData,
   SessionSummary,
@@ -35,7 +36,8 @@ export interface IpcInvokeMap {
   "agent:cancel": { args: []; result: void };
 
   "git:get-info": { args: []; result: GitInfo };
-  "search:workspace": { args: [query: string]; result: SearchResult };
+  "search:workspace": { args: [query: string, caseSensitive?: boolean]; result: SearchResult };
+  "symbols:workspace": { args: [query: string]; result: { hits: SymbolHit[]; truncated: boolean } };
 
   "session:list": { args: []; result: SessionSummary[] };
   "session:load": { args: [id: string]; result: SessionData | null };
@@ -50,13 +52,14 @@ export interface IpcInvokeMap {
   "watch:start": { args: []; result: void };
   "watch:stop": { args: []; result: void };
 
-  "term:create": { args: [cwd?: string]; result: TerminalInfo };
+  "term:create": { args: [cwd?: string, shell?: string]; result: TerminalInfo };
 }
 
 /** Fire-and-forget: ipcRenderer.send → ipcMain.on. */
 export interface IpcSendMap {
   "term:write": [id: string, data: string];
   "term:resize": [id: string, cols: number, rows: number];
+  "term:kill": [id: string];
 }
 
 /** Pushes: webContents.send → ipcRenderer.on. */
@@ -99,9 +102,10 @@ export interface ArchymedesApi {
   cancelAgent: Invoke<"agent:cancel">;
   onAgentEvent: Subscribe<"agent:event">;
 
-  // git / search
+  // git / search / symbols
   getGitInfo: Invoke<"git:get-info">;
   workspaceSearch: Invoke<"search:workspace">;
+  workspaceSymbols: Invoke<"symbols:workspace">;
 
   // sessions
   listSessions: Invoke<"session:list">;
@@ -124,6 +128,7 @@ export interface ArchymedesApi {
   createTerminal: Invoke<"term:create">;
   terminalWrite: Send<"term:write">;
   terminalResize: Send<"term:resize">;
+  terminalKill: Send<"term:kill">;
   onTerminalData: Subscribe<"term:data">;
   onTerminalExit: Subscribe<"term:exit">;
 }

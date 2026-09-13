@@ -201,4 +201,23 @@ export const ptBR: Messages = {
   "theme.solarized-dark": "Solarized escuro",
   "theme.solarized-light": "Solarized claro",
   "theme.high-contrast": "Alto contraste",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "Padrão do sistema",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Prompt de comando",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Caminho personalizado…",
+  "terminal.respawnHint": "Clique duas vezes para reiniciar o shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Padrão para novas abas de terminal. Cada aba pode escolher o próprio shell no menu +; se um shell estiver ausente, um alternativa é usado com aviso.",
+  "terminal.customPath": "Caminho do shell personalizado",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Diferenciar maiúsculas de minúsculas",
+  "status.context": "Contexto: {used} de {limit} tokens",
+  "symbols.placeholder": "Buscar símbolos com @ (funções, classes)…",
+  "symbols.empty": "Nenhum símbolo correspondente",
+  "symbols.hint": "Digite @ para ir a definições de funções e classes",
+  "common.expand": {"other":"Mostrar mais {count} linhas","one":"Mostrar mais 1 linha"},
+  "editor.readonly": "Somente leitura (arquivo grande)",
 };

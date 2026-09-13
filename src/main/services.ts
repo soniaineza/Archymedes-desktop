@@ -22,7 +22,7 @@ export interface AppServices {
   readonly snapshots: SnapshotStore;
   readonly agent: Pick<AgentRunController, "start" | "cancel">;
   readonly watcher: Pick<WorkspaceWatcher, "start" | "stop">;
-  readonly terminals: Pick<TerminalManager, "create" | "write" | "resize" | "onExit" | "disposeAll">;
+  readonly terminals: Pick<TerminalManager, "create" | "write" | "resize" | "kill" | "onExit" | "disposeAll">;
   /** Cancels the agent run, stops watching and kills every shell. Safe to call more than once. */
   dispose(): void;
 }

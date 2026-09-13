@@ -5,9 +5,11 @@ import { getGitInfo } from "./git";
 import { registerHandlers } from "./ipc-host";
 import type { HostBridge, IpcHost } from "./ipc-host";
 import { workspaceSearch } from "./search";
+import { workspaceSymbols } from "./symbols";
 import type { AppServices } from "./services";
 import { deleteSession, listSessions, loadSession, renameSession, saveSession } from "./sessions";
 import { loadSettings, saveSettings } from "./settings";
+import { isTerminalShellChoice } from "../shared/types";
 
 /**
  * Every IPC handler. The renderer can only do what is exposed here through the
@@ -58,7 +60,8 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
 
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
-      "search:workspace": (query) => workspaceSearch(workspace.requireRoot(), query),
+      "search:workspace": (query, caseSensitive) => workspaceSearch(workspace.requireRoot(), query, caseSensitive),
+      "symbols:workspace": (query) => workspaceSymbols(workspace.requireRoot(), query),
 
       // ---------- sessions ----------
       "session:list": () => listSessions(userData),
@@ -82,19 +85,26 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "watch:stop": () => watcher.stop(),
 
       // ---------- terminal ----------
-      "term:create": (cwd) => {
-        const session = terminals.create(cwd ?? workspace.root ?? undefined);
+      "term:create": async (cwd, shellOverride) => {
+        // The saved setting is the default; the renderer's per-tab dropdown overrides it.
+        const settings = await loadSettings(userData);
+        const shellRequest =
+          shellOverride && isTerminalShellChoice(shellOverride)
+            ? { choice: shellOverride, customPath: settings.terminalShellPath }
+            : { choice: settings.terminalShell, customPath: settings.terminalShellPath };
+        const session = await terminals.create(cwd ?? workspace.root ?? undefined, shellRequest);
         session.pty.onData((data) => bridge.emit("term:data", session.id, data));
         session.pty.onExit(({ exitCode }) => {
           bridge.emit("term:exit", session.id, exitCode);
           terminals.onExit(session.id);
         });
-        return { id: session.id, cwd: session.cwd };
+        return { id: session.id, cwd: session.cwd, shellLabel: session.shellLabel, warning: session.warning };
       },
     },
     {
       "term:write": (id, data) => terminals.write(id, data),
       "term:resize": (id, cols, rows) => terminals.resize(id, cols, rows),
+      "term:kill": (id) => terminals.kill(id),
     },
   );
 }

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { supportsSymlinks } from "../../test-support/symlinks";
 import {
   WorkspaceViolation,
   editTextFile,
@@ -26,14 +27,16 @@ afterEach(async () => {
 });
 
 describe("realPathWithin", () => {
-  it("accepts paths inside a root that is itself reached through a symlink", async () => {
+  it("accepts paths inside a root that is itself reached through a symlink", async (ctx) => {
+    if (!(await supportsSymlinks())) return ctx.skip();
     await fs.writeFile(path.join(root, "a.txt"), "hi");
     const linkedRoot = path.join(outside, "linked-root");
     await fs.symlink(root, linkedRoot);
     await expect(realPathWithin(linkedRoot, "a.txt")).resolves.toBe(await fs.realpath(path.join(root, "a.txt")));
   });
 
-  it("refuses a not-yet-existing path whose existing ancestor escapes through a symlink", async () => {
+  it("refuses a not-yet-existing path whose existing ancestor escapes through a symlink", async (ctx) => {
+    if (!(await supportsSymlinks())) return ctx.skip();
     await fs.symlink(outside, path.join(root, "out-link"));
     await expect(realPathWithin(root, "out-link/new/deep/evil.txt")).rejects.toThrow(WorkspaceViolation);
   });
@@ -56,13 +59,15 @@ describe("realPathWithin", () => {
     await expect(realPathWithin(root, "../outside.txt")).rejects.toThrow(WorkspaceViolation);
   });
 
-  it("refuses a symlink that points outside the root", async () => {
+  it("refuses a symlink that points outside the root", async (ctx) => {
+    if (!(await supportsSymlinks())) return ctx.skip();
     await fs.writeFile(path.join(outside, "secret.txt"), "top secret");
     await fs.symlink(path.join(outside, "secret.txt"), path.join(root, "link.txt"));
     await expect(realPathWithin(root, "link.txt")).rejects.toThrow(WorkspaceViolation);
   });
 
-  it("allows a symlink that points to another location inside the root", async () => {
+  it("allows a symlink that points to another location inside the root", async (ctx) => {
+    if (!(await supportsSymlinks())) return ctx.skip();
     await fs.mkdir(path.join(root, "sub"));
     await fs.writeFile(path.join(root, "sub", "real.txt"), "hi");
     await fs.symlink(path.join(root, "sub", "real.txt"), path.join(root, "link.txt"));
@@ -78,7 +83,8 @@ describe("readTextFile / writeTextFile / editTextFile", () => {
     expect(result.content).toBe("line1\nline2\n");
   });
 
-  it("refuses to write through a symlink that escapes the root", async () => {
+  it("refuses to write through a symlink that escapes the root", async (ctx) => {
+    if (!(await supportsSymlinks())) return ctx.skip();
     await fs.symlink(outside, path.join(root, "out-link"));
     await expect(writeTextFile(root, "out-link/evil.txt", "pwned")).rejects.toThrow(WorkspaceViolation);
   });

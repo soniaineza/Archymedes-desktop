@@ -202,4 +202,23 @@ export const en = {
   "theme.solarized-dark": "Solarized Dark",
   "theme.solarized-light": "Solarized Light",
   "theme.high-contrast": "High Contrast",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "System default",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Command Prompt",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Custom path…",
+  "terminal.respawnHint": "Double-click to restart the shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Default for new terminal tabs. Each tab can pick its own shell from the + menu; if a shell is missing, a fallback is used and noted.",
+  "terminal.customPath": "Custom shell path",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Match case",
+  "status.context": "Context: {used} of {limit} tokens",
+  "symbols.placeholder": "Search symbols with @ (functions, classes)…",
+  "symbols.empty": "No matching symbols",
+  "symbols.hint": "Type @ to jump to function and class definitions",
+  "common.expand": {"other":"Show {count} more lines","one":"Show 1 more line"},
+  "editor.readonly": "Read-only (large file)",
 } satisfies Record<string, Message>;

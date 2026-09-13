@@ -200,4 +200,23 @@ export const zhCN: Messages = {
   "theme.solarized-dark": "Solarized 深色",
   "theme.solarized-light": "Solarized 浅色",
   "theme.high-contrast": "高对比度",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "系统默认",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "命令提示符",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "自定义路径…",
+  "terminal.respawnHint": "双击以重启 shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "新建终端标签页的默认设置。每个标签页都可以通过 + 菜单选择自己的 shell；如果找不到所需的 shell，将使用后备方案并给出提示。",
+  "terminal.customPath": "自定义 shell 路径",
+  "settings.tab.terminal": "终端",
+  "search.caseSensitive": "区分大小写",
+  "status.context": "上下文：{limit} 个 token 中已用 {used}",
+  "symbols.placeholder": "用 @ 搜索符号（函数、类）…",
+  "symbols.empty": "没有匹配的符号",
+  "symbols.hint": "输入 @ 跳转到函数和类定义",
+  "common.expand": {"other":"显示更多 {count} 行","one":"显示更多 1 行"},
+  "editor.readonly": "只读（大文件）",
 };

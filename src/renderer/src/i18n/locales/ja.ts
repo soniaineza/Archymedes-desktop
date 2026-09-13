@@ -201,4 +201,23 @@ export const ja: Messages = {
   "theme.solarized-dark": "Solarized ダーク",
   "theme.solarized-light": "Solarized ライト",
   "theme.high-contrast": "ハイコントラスト",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "システムのデフォルト",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "コマンドプロンプト",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "カスタムパス…",
+  "terminal.respawnHint": "ダブルクリックでシェルを再起動",
+  "terminal.shellLabel": "シェル",
+  "terminal.shellHint": "新しいターミナルタブの既定値。各タブは + メニューから個別にシェルを選べます。シェルが見つからない場合はフォールバックが使われ、通知されます。",
+  "terminal.customPath": "カスタムシェルのパス",
+  "settings.tab.terminal": "ターミナル",
+  "search.caseSensitive": "大文字と小文字を区別",
+  "status.context": "コンテキスト: {limit} トークン中 {used} 使用",
+  "symbols.placeholder": "@ でシンボルを検索（関数・クラス）…",
+  "symbols.empty": "一致するシンボルがありません",
+  "symbols.hint": "@ と入力して関数・クラス定義へ移動",
+  "common.expand": {"other":"さらに{count}行を表示","one":"さらに1行を表示"},
+  "editor.readonly": "読み取り専用（大きなファイル）",
 };

@@ -53,6 +53,7 @@ const api: ArchymedesApi = {
 
   getGitInfo: () => invoke("git:get-info"),
   workspaceSearch: (...args) => invoke("search:workspace", ...args),
+  workspaceSymbols: (...args) => invoke("symbols:workspace", ...args),
 
   listSessions: () => invoke("session:list"),
   loadSession: (...args) => invoke("session:load", ...args),
@@ -71,6 +72,7 @@ const api: ArchymedesApi = {
   createTerminal: (...args) => invoke("term:create", ...args),
   terminalWrite: (...args) => send("term:write", ...args),
   terminalResize: (...args) => send("term:resize", ...args),
+  terminalKill: (...args) => send("term:kill", ...args),
   onTerminalData: (handler) => subscribe("term:data", handler),
   onTerminalExit: (handler) => subscribe("term:exit", handler),
 };

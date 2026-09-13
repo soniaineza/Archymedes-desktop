@@ -40,6 +40,7 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
 
     getGitInfo: vi.fn(async () => ({ isRepo: false, branch: "", dirtyCount: 0 })),
     workspaceSearch: vi.fn(async () => ({ truncated: false, hits: [] })),
+    workspaceSymbols: vi.fn(async () => ({ hits: [], truncated: false })),
 
     listSessions: vi.fn(async () => []),
     loadSession: vi.fn(async () => null),
@@ -63,6 +64,7 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
     createTerminal: vi.fn(async (cwd?: string) => ({ id: "term-1", cwd: cwd ?? "/" })),
     terminalWrite: vi.fn(),
     terminalResize: vi.fn(),
+    terminalKill: vi.fn(),
     onTerminalData: () => () => {},
     onTerminalExit: () => () => {},
 

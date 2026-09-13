@@ -4,8 +4,11 @@ import { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
 import { getTheme, resolveTheme } from "../lib/theme";
 import type { ResolvedTheme } from "../lib/theme";
+import type { TerminalShellChoice } from "@shared/types";
 import { Icon } from "./Icon";
+import type { IconName } from "./Icon";
 import { useI18n } from "../i18n/I18nProvider";
+import type { MessageKey } from "../i18n/types";
 
 interface XtermColors {
   background: string;
@@ -22,6 +25,15 @@ const TERM_COLORS: Record<ResolvedTheme, XtermColors> = {
   "high-contrast": { background: "#000000", foreground: "#ffffff", cursor: "#ffffff", selectionBackground: "#888888" },
 };
 
+/** The per-tab shell menu; "default" reads the saved Settings value. */
+const SHELL_MENU: { choice: TerminalShellChoice; icon: IconName; labelKey: MessageKey }[] = [
+  { choice: "default", icon: "terminal", labelKey: "terminal.shellDefault" },
+  { choice: "powershell", icon: "terminal", labelKey: "terminal.shellPowershell" },
+  { choice: "cmd", icon: "terminal", labelKey: "terminal.shellCmd" },
+  { choice: "gitbash", icon: "terminal", labelKey: "terminal.shellGitBash" },
+  { choice: "custom", icon: "sliders", labelKey: "terminal.shellCustom" },
+];
+
 interface Props {
   workspace: string;
   collapsed: boolean;
@@ -34,6 +46,9 @@ interface TermEntry {
   ptyId: string | null;
   term: Terminal;
   fit: FitAddon;
+  exited: boolean;
+  shellChoice: TerminalShellChoice;
+  shellLabel: string | null;
   dispose: () => void;
 }
 
@@ -42,16 +57,38 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
   const [tabIds, setTabIds] = useState<number[]>([0]);
   const [activeTab, setActiveTab] = useState(0);
   const [tick, setTick] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const termsRef = useRef<Map<number, TermEntry>>(new Map());
+  /** Shell choices waiting for their tab's create effect to run. */
+  const pendingChoiceRef = useRef<Map<number, TerminalShellChoice>>(new Map());
   const activeRef = useRef(activeTab);
   const tRef = useRef(t);
   activeRef.current = activeTab;
   tRef.current = t;
 
-  // Create a terminal for the active tab when it has none yet.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  // Create a terminal for the active tab when it has none yet. `tick` is a
+  // dependency so respawn can dispose an entry and re-trigger creation.
   useEffect(() => {
     if (collapsed || termsRef.current.has(activeTab)) return;
+    const shellChoice = pendingChoiceRef.current.get(activeTab) ?? "default";
 
     const term = new Terminal({
       fontSize: 12.5,
@@ -70,22 +107,29 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
       fit.fit();
     }
 
-    const entry: TermEntry = { ptyId: null, term, fit, dispose: () => term.dispose() };
+    const entry: TermEntry = { ptyId: null, term, fit, exited: false, shellChoice, shellLabel: null, dispose: () => term.dispose() };
     termsRef.current.set(activeTab, entry);
     setTick((n) => n + 1);
 
     let disposed = false;
-    void window.archymedes.createTerminal().then((info) => {
+    void window.archymedes.createTerminal(undefined, shellChoice).then((info) => {
       if (disposed) return;
       entry.ptyId = info.id;
+      entry.shellLabel = info.shellLabel ?? null;
+      if (info.warning) term.write(`\x1b[33m⚠ ${info.warning}\x1b[0m\r\n`);
       window.archymedes.terminalResize(info.id, term.cols, term.rows);
+      setTick((n) => n + 1); // re-render so the tab badge shows the launched shell
     });
 
     const offData = window.archymedes.onTerminalData((id, data) => {
       if (entry.ptyId && id === entry.ptyId) term.write(data);
     });
     const offExit = window.archymedes.onTerminalExit((id) => {
-      if (entry.ptyId && id === entry.ptyId) term.write(`\r\n\x1b[90m${tRef.current("terminal.exited")}\x1b[0m\r\n`);
+      if (entry.ptyId && id === entry.ptyId) {
+        entry.exited = true;
+        term.write(`\r\n\x1b[90m${tRef.current("terminal.exited")}\x1b[0m\r\n`);
+        setTick((n) => n + 1); // dim the dead tab
+      }
     });
     const dataHandler = term.onData((data) => {
       if (!entry.ptyId) return;
@@ -133,7 +177,7 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
       window.removeEventListener("archymedes-theme", onTheme);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed, activeTab, workspace]);
+  }, [collapsed, activeTab, workspace, tick]);
 
   // Attach the active terminal's DOM when switching tabs or expanding.
   useEffect(() => {
@@ -161,7 +205,9 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
   }, []);
 
   const closeTab = (tabId: number) => {
-    termsRef.current.get(tabId)?.dispose();
+    const entry = termsRef.current.get(tabId);
+    if (entry?.ptyId) window.archymedes.terminalKill(entry.ptyId); // kill the shell, not just the view
+    entry?.dispose();
     termsRef.current.delete(tabId);
     const next = tabIds.filter((id) => id !== tabId);
     if (next.length === 0) {
@@ -173,10 +219,22 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
     }
   };
 
-  const addTab = () => {
+  const addTabWithChoice = (choice: TerminalShellChoice) => {
     const newId = Math.max(...tabIds) + 1;
+    pendingChoiceRef.current.set(newId, choice);
     setTabIds((ids) => [...ids, newId]);
     setActiveTab(newId);
+    setMenuOpen(false);
+  };
+
+  /** Dispose the dead entry and recreate the tab with the same shell. */
+  const respawnTab = (tabId: number) => {
+    const entry = termsRef.current.get(tabId);
+    if (!entry?.exited) return;
+    entry.dispose();
+    termsRef.current.delete(tabId);
+    pendingChoiceRef.current.set(tabId, entry.shellChoice);
+    setTick((n) => n + 1); // re-runs the create effect for the active tab
   };
 
   return (
@@ -193,34 +251,65 @@ export function TerminalPanel({ workspace, collapsed, height, onToggleCollapsed,
         </button>
         {!collapsed && (
           <div className="term-tabs" role="tablist">
-            {tabIds.map((tabId) => (
-              <div
-                key={tabId}
-                role="tab"
-                aria-selected={tabId === activeTab}
-                tabIndex={tabId === activeTab ? 0 : -1}
-                className={`term-tab${tabId === activeTab ? " active" : ""}`}
-                onClick={() => setActiveTab(tabId)}
+            {tabIds.map((tabId) => {
+              const entry = termsRef.current.get(tabId);
+              const fallbackKey = SHELL_MENU.find((m) => m.choice === entry?.shellChoice)?.labelKey ?? "terminal.shellDefault";
+              const label = entry?.shellLabel ?? t(fallbackKey);
+              return (
+                <div
+                  key={tabId}
+                  role="tab"
+                  aria-selected={tabId === activeTab}
+                  tabIndex={tabId === activeTab ? 0 : -1}
+                  className={`term-tab${tabId === activeTab ? " active" : ""}${entry?.exited ? " exited" : ""}`}
+                  onClick={() => setActiveTab(tabId)}
+                  onDoubleClick={() => {
+                    if (entry?.exited) void respawnTab(tabId);
+                  }}
+                  title={entry?.exited ? t("terminal.respawnHint") : undefined}
+                >
+                  <span className="term-tab-label">
+                    {t("terminal.shell", { n: formatNumber(tabId + 1) })}
+                    {label && <span className="term-shell-badge">{label}</span>}
+                  </span>
+                  {tabIds.length > 1 && (
+                    <button
+                      className="tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(tabId);
+                      }}
+                      aria-label={t("terminal.close")}
+                      title={t("terminal.close")}
+                    >
+                      <Icon name="x" size={11} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <div className="term-add-wrap" ref={menuRef}>
+              <button
+                className="icon-btn"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                title={t("terminal.new")}
+                aria-label={t("terminal.new")}
               >
-                {t("terminal.shell", { n: formatNumber(tabId + 1) })}
-                {tabIds.length > 1 && (
-                  <button
-                    className="tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tabId);
-                    }}
-                    aria-label={t("terminal.close")}
-                    title={t("terminal.close")}
-                  >
-                    <Icon name="x" size={11} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button className="icon-btn" onClick={addTab} title={t("terminal.new")} aria-label={t("terminal.new")}>
-              <Icon name="plus" size={14} />
-            </button>
+                <Icon name="plus" size={14} />
+              </button>
+              {menuOpen && (
+                <div className="term-shell-menu popover" role="menu">
+                  {SHELL_MENU.map((item) => (
+                    <button key={item.choice} role="menuitem" onClick={() => addTabWithChoice(item.choice)}>
+                      <Icon name={item.icon} size={13} />
+                      {t(item.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

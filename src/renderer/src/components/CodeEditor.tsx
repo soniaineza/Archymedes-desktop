@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { OpenTab } from "../lib/tabs";
 import { fileName, isDirty } from "../lib/tabs";
@@ -72,6 +72,21 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
       e.preventDefault();
       if (active) onSave(active.path, active.content);
+      return;
+    }
+
+    // A truncated tab is read-only: edits here could never be saved in full.
+    if (active?.truncated) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose(active.path);
+      }
+      return;
+    }
+
+    if (e.key === "Escape" && active && isDirty(active)) {
+      e.preventDefault();
+      onClose(active.path);
       return;
     }
 
@@ -151,6 +166,11 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
 
   const lineCount = active ? active.content.split("\n").length : 0;
   const lang = active ? langOf(active.path) : "text";
+  // Tokenizing is the editor's hot path; only recompute when file or text changes.
+  const highlighted = useMemo(
+    () => (active ? highlightCode(active.content, lang) : null),
+    [active?.path, active?.content, lang],
+  );
 
   return (
     <div className="editor">
@@ -204,7 +224,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
             <div className="editor-stack">
               <div className="editor-highlight" ref={hlRef} aria-hidden>
                 <pre>
-                  <code>{highlightCode(active.content, lang)}</code>
+                  <code>{highlighted}</code>
                 </pre>
               </div>
               <textarea
@@ -220,6 +240,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
                 }}
                 className="editor-textarea"
                 value={active.content}
+                readOnly={active.truncated === true}
                 onChange={(e) => {
                   onChange(active.path, e.target.value);
                   setTimeout(updateCursor, 0);
@@ -240,6 +261,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
             <bdi className="editor-path" dir="ltr">
               {active.path}
             </bdi>
+            {active.truncated && <span className="pill warn">{t("editor.readonly")}</span>}
             {active.truncated && (
               <span className="pill warn">
                 <Icon name="alert" size={11} />

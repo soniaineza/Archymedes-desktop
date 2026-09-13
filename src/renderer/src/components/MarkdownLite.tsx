@@ -150,6 +150,53 @@ function renderProse(content: string): ReactNode[] {
   return out;
 }
 
+const DIFF_COLLAPSE_AFTER = 12;
+
+/** A ```diff/```patch fence rendered as colored before/after with expand/collapse. */
+function DiffBlock({ code }: { code: string }) {
+  const { t } = useI18n();
+  const lines = code.split("\n");
+  const added = lines.filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+  const removed = lines.filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  const [expanded, setExpanded] = useState(lines.length <= DIFF_COLLAPSE_AFTER);
+  const visible = expanded ? lines : lines.slice(0, DIFF_COLLAPSE_AFTER);
+  const hidden = lines.length - visible.length;
+
+  return (
+    <div className="code-block diff-block" dir="ltr">
+      <div className="code-block-bar">
+        <span>
+          diff <b className="diff-stat">+{added.length}</b> <b className="diff-stat del">−{removed.length}</b>
+        </span>
+        <CopyButton text={code} />
+      </div>
+      <pre className="diff-lines">
+        <code>
+          {visible.map((line, i) => {
+            const kind = line.startsWith("@@")
+              ? "hunk"
+              : line.startsWith("+") && !line.startsWith("+++")
+                ? "add"
+                : line.startsWith("-") && !line.startsWith("---")
+                  ? "del"
+                  : "ctx";
+            return (
+              <span key={i} className={`diff-line ${kind}`}>
+                {line || " "}
+              </span>
+            );
+          })}
+        </code>
+      </pre>
+      {hidden > 0 && (
+        <button className="diff-expand" onClick={() => setExpanded(true)}>
+          {t("common.expand", { count: hidden })}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function CopyButton({ text, label }: { text: string; label?: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -179,7 +226,10 @@ export function MarkdownLite({ text }: { text: string }) {
     <>
       {splitFences(text).map((block, i) =>
         block.kind === "code" ? (
-          <div key={i} className="code-block" dir="ltr">
+          block.lang === "diff" || block.lang === "patch" ? (
+            <DiffBlock key={i} code={block.code} />
+          ) : (
+            <div key={i} className="code-block" dir="ltr">
             <div className="code-block-bar">
               <span>{block.lang}</span>
               <CopyButton text={block.code} />
@@ -188,6 +238,7 @@ export function MarkdownLite({ text }: { text: string }) {
               <code>{highlightCode(block.code, block.lang)}</code>
             </pre>
           </div>
+          )
         ) : (
           <Fragment key={i}>{renderProse(block.content)}</Fragment>
         ),

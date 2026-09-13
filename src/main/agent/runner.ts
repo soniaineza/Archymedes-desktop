@@ -6,6 +6,7 @@ import type { ToolExecutor } from "./tools";
 import { readFileForEditor } from "../fs-ui";
 import { listFilesFallback } from "../core/workspace-bridge";
 import { catalogPricesOf } from "../core/price-lookup";
+import { budgetsFor } from "../core/model-capabilities";
 import { priceUsage, convertMoney, addMoney, money } from "../core/money";
 
 /**
@@ -110,6 +111,9 @@ export class AgentRunner {
     // adding e.g. USD prices to a EUR total throws.
     const prices = catalogPricesOf(this.settings.provider, this.settings.model);
     const totals = { input: 0, output: 0, cached: 0, cost: money(0, prices?.currency ?? this.settings.currency) };
+    // The last turn's prompt size vs the model's window drives the context meter.
+    const { contextLimit } = budgetsFor(this.settings.model);
+    let contextTokens = 0;
 
     const { currency: displayCurrency, exchangeRate } = this.settings;
     const convert = displayCurrency !== totals.cost.currency && exchangeRate > 0;
@@ -120,6 +124,8 @@ export class AgentRunner {
         inputTokens: totals.input,
         outputTokens: totals.output,
         cachedInputTokens: totals.cached,
+        contextTokens,
+        contextLimit,
         costMicros: shown.micros,
         currency: shown.currency,
         converted: convert,
@@ -129,6 +135,10 @@ export class AgentRunner {
     };
 
     let iteration = 0;
+    // Tracks the assistant message the UI is currently rendering. If the
+    // adapter throws mid-stream, the catch still closes it — otherwise the
+    // renderer shows a pending spinner forever.
+    let openMessageId: string | null = null;
     this.emit({ type: "status", status: "thinking" });
 
     try {
@@ -147,6 +157,7 @@ export class AgentRunner {
         let errorMessage: string | undefined;
 
         const msgId = id("msg");
+        openMessageId = msgId;
         this.emit({ type: "message-start", id: msgId });
 
         await adapter.runTurn({
@@ -179,6 +190,7 @@ export class AgentRunner {
                 totals.input += event.inputTokens;
                 totals.output += event.outputTokens;
                 totals.cached += event.cachedInputTokens ?? 0;
+                contextTokens = event.inputTokens;
                 if (prices) {
                   const turnCost = priceUsage(
                     { inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedInputTokens: event.cachedInputTokens },
@@ -194,6 +206,7 @@ export class AgentRunner {
         });
 
         this.emit({ type: "message-end", id: msgId });
+        openMessageId = null;
 
         if (errorMessage) {
           this.emit({ type: "error", message: errorMessage });
@@ -214,7 +227,13 @@ export class AgentRunner {
 
         const results: HistoryToolResult[] = [];
         for (const call of calls) {
-          if (this.controller.signal.aborted) break;
+          if (this.controller.signal.aborted) {
+            // Cancelled calls still need a result: honest UI feedback and a
+            // consistent turn history if this conversation is ever replayed.
+            results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result: "(cancelled)", isError: true });
+            this.emit({ type: "tool-result", toolCallId: call.toolCallId, result: "(cancelled)", isError: true });
+            continue;
+          }
           const { output, isError } = await runTool(call.name, call.args, toolContext);
           results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result: output, isError });
           this.emit({ type: "tool-result", toolCallId: call.toolCallId, result: output, isError });
@@ -235,6 +254,11 @@ export class AgentRunner {
         this.emit({ type: "status", status: "error" });
       }
     } catch (err) {
+      // Close any message the UI still renders as pending before reporting.
+      if (openMessageId) {
+        this.emit({ type: "message-end", id: openMessageId });
+        openMessageId = null;
+      }
       if (!this.controller.signal.aborted) {
         this.emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
         this.emit({ type: "status", status: "error" });

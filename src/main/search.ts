@@ -4,9 +4,10 @@ import type { SearchHit, SearchResult } from "../shared/types";
 import { DEFAULT_WORKSPACE_LIMITS } from "./core/workspace";
 
 /**
- * A grep-lite over the workspace: case-insensitive literal search, skips
- * heavy/binary directories, and returns line-level hits capped so the UI
- * stays responsive. Symlinks are never followed (only real files are walked).
+ * A grep-lite over the workspace: literal search (case-insensitive by
+ * default, with an exact-case option), skips heavy/binary directories, and
+ * returns line-level hits capped so the UI stays responsive. Symlinks are
+ * never followed (only real files are walked).
  */
 
 const SKIP_DIRS = new Set(DEFAULT_WORKSPACE_LIMITS.ignoredDirectories);
@@ -36,13 +37,14 @@ async function walk(dir: string, rel: string, out: string[]): Promise<void> {
   }
 }
 
-export async function workspaceSearch(root: string, rawQuery: string): Promise<SearchResult> {
+export async function workspaceSearch(root: string, rawQuery: string, caseSensitive = false): Promise<SearchResult> {
   const query = rawQuery.trim();
   if (query.length < 2) return { truncated: false, hits: [] };
   const files: string[] = [];
   await walk(root, "", files);
 
-  const needle = query.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const haystack = (line: string): string => (caseSensitive ? line : line.toLowerCase());
   const hits: SearchHit[] = [];
 
   for (const rel of files) {
@@ -60,11 +62,11 @@ export async function workspaceSearch(root: string, rawQuery: string): Promise<S
 
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i += 1) {
-      if (!lines[i].toLowerCase().includes(needle)) continue;
-      if (hits.length >= MAX_HITS) return { truncated: true, hits };
+      if (!haystack(lines[i]).includes(needle)) continue;
+      if (hits.length >= MAX_HITS) return { truncated: true, hits, caseSensitive };
       hits.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 160) });
     }
   }
 
-  return { truncated: false, hits };
+  return { truncated: false, hits, caseSensitive };
 }

@@ -37,6 +37,11 @@ export function StatusBar({ status, usage, git, workspaceName, onOpenPalette }: 
   const { t, formatCompact, formatCost, formatNumber, shortcut } = useI18n();
   const busy = status !== "idle" && status !== "error";
 
+  // Context meter: last turn's prompt vs the model's window (when known).
+  const contextPct =
+    usage?.contextTokens && usage?.contextLimit ? Math.min(100, (usage.contextTokens / usage.contextLimit) * 100) : null;
+  const contextTone = contextPct === null ? "" : contextPct >= 85 ? " hot" : contextPct >= 60 ? " warm" : "";
+
   return (
     <footer className="statusbar">
       <span className="seg strong">
@@ -65,6 +70,14 @@ export function StatusBar({ status, usage, git, workspaceName, onOpenPalette }: 
           <bdi dir="ltr">
             ↑{formatCompact(usage.inputTokens)} ↓{formatCompact(usage.outputTokens)}
           </bdi>
+        </span>
+      )}
+      {usage && contextPct !== null && (
+        <span className="seg" title={t("status.context", { used: usage.contextTokens ?? 0, limit: usage.contextLimit ?? 0 })}>
+          <span className="context-meter" role="img">
+            <span className={`context-fill${contextTone}`} style={{ width: `${Math.max(3, contextPct)}%` }} />
+          </span>
+          {formatNumber(Math.round(contextPct), { style: "percent", maximumFractionDigits: 0 })}
         </span>
       )}
       {usage && (

@@ -201,4 +201,23 @@ export const fr: Messages = {
   "theme.solarized-dark": "Solarized sombre",
   "theme.solarized-light": "Solarized clair",
   "theme.high-contrast": "Contraste élevé",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "Valeur par défaut du système",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Invite de commandes",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Chemin personnalisé…",
+  "terminal.respawnHint": "Double-cliquez pour relancer le shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Valeur par défaut des nouveaux onglets de terminal. Chaque onglet peut choisir son shell via le menu + ; si un shell manque, un shell de secours est utilisé avec un avertissement.",
+  "terminal.customPath": "Chemin du shell personnalisé",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Respecter la casse",
+  "status.context": "Contexte : {used} sur {limit} jetons",
+  "symbols.placeholder": "Rechercher des symboles avec @ (fonctions, classes)…",
+  "symbols.empty": "Aucun symbole correspondant",
+  "symbols.hint": "Tapez @ pour aller aux définitions de fonctions et de classes",
+  "common.expand": {"other":"Afficher {count} lignes de plus","one":"Afficher 1 ligne de plus"},
+  "editor.readonly": "Lecture seule (fichier volumineux)",
 };

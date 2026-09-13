@@ -201,4 +201,23 @@ export const hi: Messages = {
   "theme.solarized-dark": "Solarized डार्क",
   "theme.solarized-light": "Solarized लाइट",
   "theme.high-contrast": "हाई कंट्रास्ट",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "सिस्टम डिफ़ॉल्ट",
+  "terminal.shellPowershell": "पावरशेल",
+  "terminal.shellCmd": "कमांड प्रॉम्प्ट",
+  "terminal.shellGitBash": "गिट बैश",
+  "terminal.shellCustom": "कस्टम पथ…",
+  "terminal.respawnHint": "शेल को पुनः आरंभ करने के लिए डबल-क्लिक करें",
+  "terminal.shellLabel": "शेल",
+  "terminal.shellHint": "नए टर्मिनल टैब के लिए डिफ़ॉल्ट। हर टैब + मेनू से अपना शेल चुन सकता है; शेल उपलब्ध न होने पर विकल्प उपयोग होता है और सूचित किया जाता है।",
+  "terminal.customPath": "कस्टम शेल पथ",
+  "settings.tab.terminal": "टर्मिनल",
+  "search.caseSensitive": "केस मिलाएँ",
+  "status.context": "संदर्भ: {limit} टोकन में से {used} उपयोग",
+  "symbols.placeholder": "@ से प्रतीक खोजें (फ़ंक्शन, क्लास)…",
+  "symbols.empty": "कोई मेल खाते प्रतीक नहीं",
+  "symbols.hint": "फ़ंक्शन और क्लास परिभाषाओं पर जाने के लिए @ टाइप करें",
+  "common.expand": {"other":"{count} और पंक्तियाँ दिखाएँ","one":"1 और पंक्ति दिखाएँ"},
+  "editor.readonly": "केवल पढ़ने के लिए (बड़ी फ़ाइल)",
 };

@@ -193,6 +193,14 @@ export default function App() {
     }
   };
 
+  // Ctrl+1…8 activate the nth tab, Ctrl+9 the last — the Chrome/VS Code convention.
+  const activateTabIndex = (index: number) => {
+    const list = tabsRef.current;
+    if (list.length === 0) return;
+    const tab = index >= 8 ? list[list.length - 1] : (list[index] ?? undefined);
+    if (tab) setActiveTab(tab.path);
+  };
+
   const closeTab = (path: string) => {
     const idx = tabs.findIndex((tab) => tab.path === path);
     const next = tabs.filter((tab) => tab.path !== path);
@@ -250,6 +258,13 @@ export default function App() {
     if (!workspace) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
+      // Digit1…9 use physical codes so numpad and layouts both work.
+      const digitIndex = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9"].indexOf(e.code);
+      if (digitIndex !== -1) {
+        e.preventDefault();
+        activateTabIndex(digitIndex);
+        return;
+      }
       const handlers: Record<string, (() => void) | undefined> = {
         KeyP: e.shiftKey ? () => setOverlay((o) => (o === "palette" ? null : "palette")) : () => setOverlay("quickOpen"),
         KeyF: e.shiftKey ? () => setOverlay((o) => (o === "search" ? null : "search")) : undefined,
@@ -429,7 +444,14 @@ export default function App() {
           onClose={() => setOverlay(null)}
         />
       )}
-      {overlay === "quickOpen" && <QuickOpen files={files} onClose={() => setOverlay(null)} onOpen={(p) => void openFile(p)} />}
+      {overlay === "quickOpen" && (
+        <QuickOpen
+          files={files}
+          onClose={() => setOverlay(null)}
+          onOpen={(p) => void openFile(p)}
+          onOpenAtLine={(p, line) => void openFile(p, line)}
+        />
+      )}
       {overlay === "palette" && <CommandPalette commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsModal

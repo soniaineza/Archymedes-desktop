@@ -222,4 +222,23 @@ export const ar: Messages = {
   "theme.solarized-dark": "Solarized داكن",
   "theme.solarized-light": "Solarized فاتح",
   "theme.high-contrast": "تباين عالٍ",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "افتراضي النظام",
+  "terminal.shellPowershell": "باورشل",
+  "terminal.shellCmd": "موجه الأوامر",
+  "terminal.shellGitBash": "جيت باش",
+  "terminal.shellCustom": "مسار مخصص…",
+  "terminal.respawnHint": "انقر نقرًا مزدوجًا لإعادة تشغيل الصدفة",
+  "terminal.shellLabel": "الصدفة",
+  "terminal.shellHint": "افتراضي لعلامات تبويب الطرفية الجديدة. يمكن لكل علامة اختيار صدفتها من قائمة +؛ إذا كانت الصدفة غير متوفرة، تُستخدم بديلة مع تنبيه.",
+  "terminal.customPath": "مسار الصدفة المخصص",
+  "settings.tab.terminal": "الطرفية",
+  "search.caseSensitive": "مطابقة حالة الأحرف",
+  "status.context": "السياق: {used} من {limit} رمز",
+  "symbols.placeholder": "ابحث عن الرموز بـ @ (الدوال، الأصناف)…",
+  "symbols.empty": "لا توجد رموز مطابقة",
+  "symbols.hint": "اكتب @ للانتقال إلى تعريفات الدوال والأصناف",
+  "common.expand": {"other":"إظهار {count} سطرًا إضافيًا","one":"إظهار سطر إضافي واحد"},
+  "editor.readonly": "للقراءة فقط (ملف كبير)",
 };

@@ -1,7 +1,8 @@
 import { AppError } from "./app-error";
 import type { InvokeArgs, InvokeChannel, IpcSendMap, SendChannel } from "./ipc-contract";
 import { isProviderId } from "./providers";
-import type { ChatMessage, ChatRole, ProviderSettings, SessionData, ToolCallInfo } from "./types";
+import type { ChatMessage, ChatRole, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
+import { isTerminalShellChoice } from "./types";
 
 /**
  * Shape checks for everything the renderer sends to the main process. They
@@ -93,7 +94,14 @@ export const providerSettings: Guard<ProviderSettings> = (v, name) => {
     currency,
     exchangeRate,
     responseLanguage: str(o.responseLanguage, `${name}.responseLanguage`),
+    terminalShell: terminalShellChoice(o.terminalShell, `${name}.terminalShell`),
+    terminalShellPath: str(o.terminalShellPath, `${name}.terminalShellPath`),
   };
+};
+
+const terminalShellChoice: Guard<TerminalShellChoice> = (v, name) => {
+  const s = str(v, name);
+  return isTerminalShellChoice(s) ? s : invalid(name, "a known shell choice");
 };
 
 export const sessionData: Guard<SessionData> = (v, name) => {
@@ -132,7 +140,8 @@ export const INVOKE_GUARDS: InvokeGuards = {
   "agent:cancel": none("agent:cancel"),
 
   "git:get-info": none("git:get-info"),
-  "search:workspace": ([query]) => [str(query, "query")],
+  "search:workspace": ([query, caseSensitive]) => [str(query, "query"), caseSensitive === undefined ? false : bool(caseSensitive, "caseSensitive")],
+  "symbols:workspace": ([query]) => [str(query, "query")],
 
   "session:list": none("session:list"),
   "session:load": ([id]) => [nonEmpty(id, "id")],
@@ -147,10 +156,11 @@ export const INVOKE_GUARDS: InvokeGuards = {
   "watch:start": none("watch:start"),
   "watch:stop": none("watch:stop"),
 
-  "term:create": ([cwd]) => [optionalStr(cwd, "cwd")],
+  "term:create": ([cwd, shell]) => [optionalStr(cwd, "cwd"), optionalStr(shell, "shell")],
 };
 
 export const SEND_GUARDS: SendGuards = {
   "term:write": ([id, data]) => [nonEmpty(id, "id"), str(data, "data")],
   "term:resize": ([id, cols, rows]) => [nonEmpty(id, "id"), int(1, 2000)(cols, "cols"), int(1, 2000)(rows, "rows")],
+  "term:kill": ([id]) => [nonEmpty(id, "id")],
 };

@@ -12,8 +12,8 @@ interface Props {
 
 const EMPTY: SearchResult = { truncated: false, hits: [] };
 
-function highlight(text: string, query: string) {
-  const idx = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+function highlight(text: string, query: string, caseSensitive = false) {
+  const idx = query ? (caseSensitive ? text.indexOf(query) : text.toLowerCase().indexOf(query.toLowerCase())) : -1;
   if (idx < 0) return text;
   return (
     <>
@@ -27,6 +27,7 @@ function highlight(text: string, query: string) {
 export function SearchPanel({ onOpenFile, onClose }: Props) {
   const { t, formatNumber } = useI18n();
   const [query, setQuery] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
   const [result, setResult] = useState<SearchResult>(EMPTY);
   const [searching, setSearching] = useState(false);
   const requestRef = useRef(0);
@@ -42,7 +43,7 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
     setSearching(true);
     const timer = setTimeout(() => {
       window.archymedes
-        .workspaceSearch(query)
+        .workspaceSearch(query, caseSensitive)
         .then((r) => {
           if (request === requestRef.current) setResult(r);
         })
@@ -54,7 +55,7 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
         });
     }, 250);
     return () => clearTimeout(timer);
-  }, [query, trimmed]);
+  }, [query, trimmed, caseSensitive]);
 
   const byFile = useMemo(() => {
     const groups = new Map<string, SearchResult["hits"]>();
@@ -79,6 +80,14 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
           aria-label={t("search.title")}
         />
         {searching && <Icon name="loader" size={14} className="spin" />}
+        <button
+          className={`case-toggle${caseSensitive ? " on" : ""}`}
+          onClick={() => setCaseSensitive((v) => !v)}
+          aria-pressed={caseSensitive}
+          title={t("search.caseSensitive")}
+        >
+          Aa
+        </button>
       </div>
       <div className="palette-list search-results" aria-live="polite">
         {trimmed.length < 2 && <div className="empty-note padded">{t("search.minChars")}</div>}
@@ -95,7 +104,7 @@ export function SearchPanel({ onOpenFile, onClose }: Props) {
             {hits.map((hit, i) => (
               <button key={i} className="search-hit" dir="ltr" onClick={() => onOpenFile(filePath, hit.line)}>
                 <span className="line">{hit.line}</span>
-                <span className="text">{highlight(hit.text, trimmed)}</span>
+                <span className="text">{highlight(hit.text, trimmed, result.caseSensitive === true)}</span>
               </button>
             ))}
           </div>

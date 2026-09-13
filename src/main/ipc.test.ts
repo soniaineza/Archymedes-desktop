@@ -76,6 +76,7 @@ function harness() {
     }),
     write: vi.fn(),
     resize: vi.fn(),
+    kill: vi.fn(),
     onExit: vi.fn(),
     disposeAll: vi.fn(),
   };

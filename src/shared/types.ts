@@ -70,6 +70,10 @@ export interface ProviderSettings {
   exchangeRate: number;
   /** English name of the language the agent replies in; "" = match the user's messages. */
   responseLanguage: string;
+  /** Default shell for new terminal tabs. */
+  terminalShell: TerminalShellChoice;
+  /** Executable path used when terminalShell is "custom". */
+  terminalShellPath: string;
 }
 
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
@@ -81,6 +85,8 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   currency: "USD",
   exchangeRate: 0,
   responseLanguage: "",
+  terminalShell: "default",
+  terminalShellPath: "",
 };
 
 /** Running cost accounting, streamed with each model turn. */
@@ -88,6 +94,10 @@ export interface CostInfo {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** Prompt tokens of the last model turn, for the context meter. */
+  contextTokens?: number;
+  /** Model context window from the capabilities table, when known. */
+  contextLimit?: number;
   /** Total cost in millionths of one unit of `currency`; the renderer formats it for the user's locale. */
   costMicros: number;
   currency: string;
@@ -99,9 +109,20 @@ export interface CostInfo {
 
 // ---------- Terminal ----------
 
+export type TerminalShellChoice = "default" | "powershell" | "cmd" | "gitbash" | "custom";
+export const TERMINAL_SHELL_CHOICES: readonly TerminalShellChoice[] = ["default", "powershell", "cmd", "gitbash", "custom"];
+
+export function isTerminalShellChoice(value: string): value is TerminalShellChoice {
+  return TERMINAL_SHELL_CHOICES.includes(value as TerminalShellChoice);
+}
+
 export interface TerminalInfo {
   id: string;
   cwd: string;
+  /** Display label of the shell that actually launched, e.g. "PowerShell". */
+  shellLabel?: string;
+  /** Set when the requested shell was unavailable and a fallback launched. */
+  warning?: string;
 }
 
 // ---------- Git ----------
@@ -123,6 +144,19 @@ export interface SearchHit {
 export interface SearchResult {
   truncated: boolean;
   hits: SearchHit[];
+  /** Echo of the requested case sensitivity, so the UI highlight matches. */
+  caseSensitive?: boolean;
+}
+
+// ---------- Symbols ----------
+
+export type SymbolKind = "function" | "class" | "interface" | "type" | "enum" | "struct" | "trait" | "impl";
+
+export interface SymbolHit {
+  path: string;
+  line: number;
+  name: string;
+  kind: SymbolKind;
 }
 
 // ---------- Sessions ----------

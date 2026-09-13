@@ -201,4 +201,23 @@ export const rw: Messages = {
   "theme.solarized-dark": "Solarized y'umwijima",
   "theme.solarized-light": "Solarized y'urumuri",
   "theme.high-contrast": "Itandukaniro rikomeye",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "Isanzwe rwa sisiteme",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Icyitegererezo cy'amabwiriza",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Inzira yihariye…",
+  "terminal.respawnHint": "Kanda incuro zombi kugira ngo utangire shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Isanzwe ku madirisha mashya ya terminal. Buri dirishya rashobora kwegurira shell yaryo mu mbandanya +; iyo ibura, ikindi gikoreshwa kandi ubamenyeshe.",
+  "terminal.customPath": "Inzira y'ishell yihariye",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Twihuriza n'inyuguti nkuru nto",
+  "status.context": "Imiterere: {used} mu {limit} intokwanzitso",
+  "symbols.placeholder": "Shakisha ibimenyetso na @ (imimero, amasomo)…",
+  "symbols.empty": "Nta bimenyetso bihuye",
+  "symbols.hint": "Andika @ kugira ngo ujye ku mibare y'imimero n'amasomo",
+  "common.expand": {"other":"Erekana imirongo {count} iyongera","one":"Erekana umurongo 1 uyongera"},
+  "editor.readonly": "Gusoma gusa (dosisiye nini)",
 };

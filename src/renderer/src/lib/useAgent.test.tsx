@@ -55,17 +55,26 @@ describe("useAgent", () => {
     expect(result.current.queue).toEqual([]);
   });
 
-  it("autosaves once per finished run, without UI-only queued messages", async () => {
+  it("persists the user message immediately on send, without UI-only queued messages", async () => {
     const { result } = renderHook(() => useAgent());
 
     act(() => result.current.send("first"));
+
+    // Crash safety: the user's words hit disk before the run even starts.
+    await waitFor(() => expect(fakeApi().saveSession).toHaveBeenCalledTimes(1));
+    const [sent] = vi.mocked(fakeApi().saveSession).mock.calls[0];
+    expect(sent.messages.some((m) => m.queued)).toBe(false);
+    expect(sent.messages.at(-1)).toMatchObject({ role: "user", content: "first" });
+
     emit({ type: "status", status: "thinking" });
     act(() => result.current.send("later"));
     emit(...reply("m1", "ok"));
 
-    await waitFor(() => expect(fakeApi().saveSession).toHaveBeenCalledTimes(1));
-    const [saved] = vi.mocked(fakeApi().saveSession).mock.calls[0];
+    // The run-end autosave still fires, now including the assistant reply.
+    await waitFor(() => expect(fakeApi().saveSession).toHaveBeenCalledTimes(2));
+    const [saved] = vi.mocked(fakeApi().saveSession).mock.calls[1];
     expect(saved.messages.some((m) => m.queued)).toBe(false);
+    expect(saved.messages.at(-1)).toMatchObject({ role: "assistant", content: "ok" });
   });
 
   it("reports that the run finished only when nothing else is queued", async () => {

@@ -201,4 +201,23 @@ export const de: Messages = {
   "theme.solarized-dark": "Solarized Dunkel",
   "theme.solarized-light": "Solarized Hell",
   "theme.high-contrast": "Hoher Kontrast",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "Systemstandard",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Eingabeaufforderung",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Eigener Pfad…",
+  "terminal.respawnHint": "Doppelklicken, um die Shell neu zu starten",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Standard für neue Terminal-Tabs. Jeder Tab kann im +-Menü eine eigene Shell wählen; fehlt eine Shell, wird ein Fallback verwendet und hinweise.",
+  "terminal.customPath": "Eigener Shell-Pfad",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Groß-/Kleinschreibung beachten",
+  "status.context": "Kontext: {used} von {limit} Token",
+  "symbols.placeholder": "Symbole mit @ suchen (Funktionen, Klassen)…",
+  "symbols.empty": "Keine passenden Symbole",
+  "symbols.hint": "Tippe @, um zu Funktions- und Klassendefinitionen zu springen",
+  "common.expand": {"other":"{count} weitere Zeilen anzeigen","one":"1 weitere Zeile anzeigen"},
+  "editor.readonly": "Schreibgeschützt (große Datei)",
 };

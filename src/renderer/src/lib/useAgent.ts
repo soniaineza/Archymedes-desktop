@@ -182,12 +182,15 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       };
       sessionRef.current = next;
       setSession(next);
+      // Crash safety: the user's words (and the auto-title) hit disk now,
+      // not only after the run finishes. The run-end autosave adds the reply.
+      void persist(next).catch(() => {});
       void window.archymedes.sendAgentMessage(withoutQueued(next.messages)).catch((err: unknown) => {
         setError(parseAppError(err));
         setStatus("error");
       });
     },
-    [],
+    [persist],
   );
   sendRef.current = send;
 

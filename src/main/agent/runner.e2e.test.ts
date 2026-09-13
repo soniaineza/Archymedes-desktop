@@ -163,6 +163,29 @@ describe("agent tool loop, end to end", () => {
     expect(types(events).at(-1)).toBe("status:error");
   });
 
+  it("closes the assistant message when the provider call throws mid-stream", async () => {
+    const events: AgentEvent[] = [];
+    const snapshots = new SnapshotStore(userData);
+    const runner = new AgentRunner({ ...DEFAULT_PROVIDER_SETTINGS, maxIterations: 10 }, workspace, (e) => events.push(e), {
+      createAdapter: () => ({
+        name: "throwing",
+        async runTurn({ onEvent }) {
+          onEvent({ type: "text-delta", delta: "partial" });
+          throw new Error("connection reset");
+        },
+      }),
+      recordSnapshot: (root, relPath) => snapshots.recordBefore(root, relPath),
+    });
+
+    await runner.run(ask("go"));
+
+    expect(events).toContainEqual({ type: "error", message: "connection reset" });
+    // The partial assistant message was closed, not left pending forever.
+    expect(events.filter((e) => e.type === "message-start")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "message-end")).toHaveLength(1);
+    expect(inOrder(types(events), ["message-start", "message-end", "error", "status:error"])).toBe(true);
+  });
+
   it("attaches @mentioned files to what the model sees", async () => {
     await fs.writeFile(path.join(workspace, "notes.md"), "remember the milk");
     const { runner, adapter } = start([{ text: "Noted." }]);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { DEFAULT_PROVIDER_SETTINGS, PRICE_CATALOG_CURRENCY } from "@shared/types";
-import type { ProviderSettings } from "@shared/types";
+import { DEFAULT_PROVIDER_SETTINGS, PRICE_CATALOG_CURRENCY, TERMINAL_SHELL_CHOICES } from "@shared/types";
+import type { ProviderSettings, TerminalShellChoice } from "@shared/types";
 import { PROVIDER_IDS, PROVIDER_INFO } from "@shared/providers";
 import type { ProviderId } from "@shared/providers";
 import { Icon } from "./Icon";
@@ -25,14 +25,24 @@ interface Props {
   onSaved: (settings: ProviderSettings) => void;
 }
 
-type Tab = "general" | "appearance" | "provider" | "costs";
+type Tab = "general" | "appearance" | "provider" | "costs" | "terminal";
 
 const TABS: readonly { id: Tab; icon: IconName; label: MessageKey }[] = [
   { id: "general", icon: "sliders", label: "settings.tab.general" },
   { id: "appearance", icon: "palette", label: "settings.tab.appearance" },
   { id: "provider", icon: "cpu", label: "settings.tab.provider" },
   { id: "costs", icon: "coins", label: "settings.tab.costs" },
+  { id: "terminal", icon: "terminal", label: "settings.tab.terminal" },
 ];
+
+/** Settings choice → the same labels the terminal + menu uses. */
+const SHELL_LABEL_KEY: Record<TerminalShellChoice, MessageKey> = {
+  default: "terminal.shellDefault",
+  powershell: "terminal.shellPowershell",
+  cmd: "terminal.shellCmd",
+  gitbash: "terminal.shellGitBash",
+  custom: "terminal.shellCustom",
+};
 
 const UI_SCALES = [0.9, 1, 1.1, 1.25];
 
@@ -309,6 +319,38 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                 <Icon name="info" size={15} />
                 <span>{t("settings.keyPrivacy")}</span>
               </div>
+            </>
+          )}
+
+          {tab === "terminal" && (
+            <>
+              <Field label={t("terminal.shellLabel")} hint={t("terminal.shellHint")} htmlFor="terminal-shell">
+                <select
+                  id="terminal-shell"
+                  className="input"
+                  value={settings.terminalShell}
+                  onChange={(e) => update("terminalShell", e.target.value as TerminalShellChoice)}
+                >
+                  {TERMINAL_SHELL_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {t(SHELL_LABEL_KEY[choice])}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {settings.terminalShell === "custom" && (
+                <Field label={t("terminal.customPath")} htmlFor="terminal-shell-path">
+                  <input
+                    id="terminal-shell-path"
+                    className="input mono"
+                    dir="ltr"
+                    spellCheck={false}
+                    placeholder={process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/bin/zsh"}
+                    value={settings.terminalShellPath}
+                    onChange={(e) => update("terminalShellPath", e.target.value)}
+                  />
+                </Field>
+              )}
             </>
           )}
 

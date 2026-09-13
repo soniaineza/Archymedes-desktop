@@ -201,4 +201,23 @@ export const sw: Messages = {
   "theme.solarized-dark": "Solarized Giza",
   "theme.solarized-light": "Solarized Mwanga",
   "theme.high-contrast": "Utofautishaji wa juu",
+
+  // --- ported feature strings ---
+  "terminal.shellDefault": "Chaguo-msingi cha mfumo",
+  "terminal.shellPowershell": "PowerShell",
+  "terminal.shellCmd": "Mwongozo wa amri",
+  "terminal.shellGitBash": "Git Bash",
+  "terminal.shellCustom": "Njia maalum…",
+  "terminal.respawnHint": "Bofya mara mbili ili uanzishe upya shell",
+  "terminal.shellLabel": "Shell",
+  "terminal.shellHint": "Chaguo-msingi kwa vichupo vipya vya terminal. Kila kichupo kinaweza kuchagua shell yake kutoka kwenye menyu ya +; ikikosekana, mbadala hutumiwa na taarifa hutolewa.",
+  "terminal.customPath": "Njia ya shell maalum",
+  "settings.tab.terminal": "Terminal",
+  "search.caseSensitive": "Linganisha herufi kubwa na ndogo",
+  "status.context": "Muktadha: {used} kati ya {limit} tokeni",
+  "symbols.placeholder": "Tafuta alama kwa @ (vichupo, madarasa)…",
+  "symbols.empty": "Hakuna alama zinazofanana",
+  "symbols.hint": "Andika @ kurudi kwenye definitions za function na class",
+  "common.expand": {"other":"Onyesha mistaro {count} zaidi","one":"Onyesha mstaro 1 zaidi"},
+  "editor.readonly": "Kusoma tu (faili kubwa)",
 };
