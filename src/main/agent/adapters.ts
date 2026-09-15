@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import type { ProviderSettings } from "../../shared/types";
 import { budgetsFor } from "../core/model-capabilities";
 import { PROVIDER_INFO } from "../../shared/providers";
+import { FreeAdapter } from "./free-adapter";
 import type {
   AdapterEvent,
   AgentAdapter,
@@ -152,10 +153,11 @@ function wireAbort(
 
 // ------------------------------------------------------- OpenAI-compatible
 
-class OpenAICompatAdapter implements AgentAdapter {
+export class OpenAICompatAdapter implements AgentAdapter {
   readonly name = "openai-compatible";
 
-  constructor(private settings: ProviderSettings) {}
+  /** `extraBody` lets free mode add its price cap and output limit without a second streaming loop. */
+  constructor(private settings: ProviderSettings, private extraBody: Record<string, unknown> = {}) {}
 
   async runTurn(input: {
     systemPrompt: string;
@@ -203,6 +205,7 @@ class OpenAICompatAdapter implements AgentAdapter {
     }
 
     const stream = await client.chat.completions.create({
+      ...(this.extraBody as object),
       model: this.settings.model,
       messages,
       stream: true,
@@ -298,6 +301,9 @@ function safeJsonParse(text: string): Record<string, unknown> {
 }
 
 export function createAdapter(settings: ProviderSettings): AgentAdapter {
+  if (settings.provider === "free") {
+    return new FreeAdapter(settings, { inner: (attempt, extraBody) => new OpenAICompatAdapter(attempt, extraBody) });
+  }
   if (settings.provider === "anthropic") {
     return new AnthropicAdapter(settings);
   }

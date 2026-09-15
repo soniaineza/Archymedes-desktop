@@ -142,7 +142,9 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
       ? t("settings.providerAnthropic")
       : settings.provider === "ollama"
         ? t("settings.providerOllama")
-        : t("settings.providerCompat");
+        : settings.provider === "free"
+          ? t("settings.providerFree")
+          : t("settings.providerCompat");
 
   return (
     <Modal onClose={onClose} labelledBy="settings-title" className="settings-modal">

@@ -195,6 +195,7 @@ export const es: Messages = {
   "settings.provider": "Proveedor",
   "settings.providerAnthropic": "Usa la API Messages de Anthropic con caché de prompts.",
   "settings.providerOllama": "Se ejecuta localmente. No necesita clave de API, solo un servidor de Ollama en marcha.",
+  "settings.providerFree": "Modelos con herramientas a precio cero, sin clave. Opcional: pega tu propia clave de OpenRouter para conectar directamente. Hay límites de uso; nunca se usan modelos de pago.",
   "settings.providerCompat": "Usa el protocolo compatible con OpenAI.",
   "settings.model": "Modelo",
   "settings.modelHint": "La ventana de contexto y los límites de salida se ajustan automáticamente al modelo.",

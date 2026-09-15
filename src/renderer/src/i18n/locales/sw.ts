@@ -195,6 +195,7 @@ export const sw: Messages = {
   "settings.provider": "Mtoa huduma",
   "settings.providerAnthropic": "Hutumia Anthropic Messages API pamoja na akiba ya maelekezo.",
   "settings.providerOllama": "Huendeshwa kwenye kompyuta yako. Hakuna ufunguo wa API unaohitajika, ila seva ya Ollama inayoendeshwa.",
+  "settings.providerFree": "Modeli za zana zisizo na gharama, hakuna ufunguo unaohitajika. Hiari: bandika ufunguo wako wa OpenRouter ili kuunganisha moja kwa moja. Kuna vikomo vya matumizi; modeli za kulipia hazitumiki kamwe.",
   "settings.providerCompat": "Hutumia itifaki inayooana na OpenAI.",
   "settings.model": "Modeli",
   "settings.modelHint": "Dirisha la muktadha na vikomo vya matokeo hujirekebisha kulingana na modeli.",

@@ -15,7 +15,7 @@ describe("provider registry", () => {
   });
 
   it("only exempts local Ollama from needing an API key", () => {
-    expect(PROVIDER_IDS.filter((id) => !PROVIDER_INFO[id].requiresApiKey)).toEqual(["ollama"]);
+    expect(PROVIDER_IDS.filter((id) => !PROVIDER_INFO[id].requiresApiKey)).toEqual(["ollama", "free"]);
   });
 
   it("uses absolute http(s) URLs for default endpoints", () => {

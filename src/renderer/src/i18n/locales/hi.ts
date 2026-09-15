@@ -195,6 +195,7 @@ export const hi: Messages = {
   "settings.provider": "प्रोवाइडर",
   "settings.providerAnthropic": "प्रॉम्प्ट कैशिंग के साथ Anthropic Messages API का उपयोग करता है।",
   "settings.providerOllama": "स्थानीय रूप से चलता है। API कुंजी की ज़रूरत नहीं, बस Ollama सर्वर चालू होना चाहिए।",
+  "settings.providerFree": "शून्य-मूल्य वाले टूल मॉडल, कुंजी की ज़रूरत नहीं। वैकल्पिक: सीधे जुड़ने के लिए अपनी OpenRouter कुंजी पेस्ट करें। दर सीमाएँ लागू हैं; सशुल्क मॉडल कभी उपयोग नहीं होते।",
   "settings.providerCompat": "OpenAI-संगत प्रोटोकॉल का उपयोग करता है।",
   "settings.model": "मॉडल",
   "settings.modelHint": "कॉन्टेक्स्ट विंडो और आउटपुट सीमाएँ मॉडल के अनुसार अपने आप तय होती हैं।",

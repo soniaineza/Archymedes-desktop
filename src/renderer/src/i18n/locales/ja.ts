@@ -195,6 +195,7 @@ export const ja: Messages = {
   "settings.provider": "プロバイダー",
   "settings.providerAnthropic": "プロンプトキャッシュ付きで Anthropic Messages API を使用します。",
   "settings.providerOllama": "ローカルで動作します。API キーは不要で、Ollama サーバーが起動していれば使えます。",
+  "settings.providerFree": "無料のツール対応モデル。キーは不要です。任意で自分の OpenRouter キーを貼り付けると直接接続します。レート制限があり、有料モデルは使われません。",
   "settings.providerCompat": "OpenAI 互換プロトコルを使用します。",
   "settings.model": "モデル",
   "settings.modelHint": "コンテキストウィンドウと出力上限はモデルに合わせて自動調整されます。",

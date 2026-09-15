@@ -195,6 +195,7 @@ export const rw: Messages = {
   "settings.provider": "Utanga serivisi",
   "settings.providerAnthropic": "Ikoresha Anthropic Messages API hamwe no kubika prompts.",
   "settings.providerOllama": "Ikorera kuri mudasobwa yawe. Ntikeneye urufunguzo rwa API, ikeneye gusa seriveri ya Ollama ikora.",
+  "settings.providerFree": "Modeli z'ibikoresho zitishyurwa, nta rufunguzo rukenewe. Bishoboka: shyiramo urufunguzo rwawe rwa OpenRouter kugira ngo uhuze mu buryo butaziguye. Hari imipaka y'ikoreshwa; modeli zishyurwa ntizikoreshwa na rimwe.",
   "settings.providerCompat": "Ikoresha porotokole ihuye na OpenAI.",
   "settings.model": "Model",
   "settings.modelHint": "Ingano y'ibyo model yibuka n'imbibi z'ibisohoka bihinduka ubwabyo hakurikijwe model.",

@@ -19,6 +19,8 @@ function exactCapabilities(models: readonly string[], contextWindow: number, max
 }
 
 const KNOWN_CAPABILITIES: ReadonlyArray<CapabilityEntry> = [
+  // Free mode's router: conservative until a concrete free model is chosen per request.
+  ...exactCapabilities(["openrouter/free"], 32_768, 4_096),
   { prefix: "gemini-2.5-pro", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: true } },
   { prefix: "gemini-2.5-flash", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: true } },
   { prefix: "gemini", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: false } },

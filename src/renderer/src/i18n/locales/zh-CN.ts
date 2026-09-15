@@ -194,6 +194,7 @@ export const zhCN: Messages = {
   "settings.provider": "服务商",
   "settings.providerAnthropic": "使用 Anthropic Messages API，并启用提示缓存。",
   "settings.providerOllama": "本地运行。无需 API 密钥，只需运行中的 Ollama 服务。",
+  "settings.providerFree": "零价格的工具调用模型，无需密钥。可选：粘贴你自己的 OpenRouter 密钥以直接连接。有速率限制；绝不使用付费模型。",
   "settings.providerCompat": "使用 OpenAI 兼容协议。",
   "settings.model": "模型",
   "settings.modelHint": "上下文窗口和输出上限会根据模型自动调整。",

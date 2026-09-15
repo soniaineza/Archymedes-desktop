@@ -195,6 +195,7 @@ export const ptBR: Messages = {
   "settings.provider": "Provedor",
   "settings.providerAnthropic": "Usa a API Messages da Anthropic com cache de prompts.",
   "settings.providerOllama": "Roda localmente. Não precisa de chave de API, apenas de um servidor Ollama em execução.",
+  "settings.providerFree": "Modelos com ferramentas a custo zero, sem chave. Opcional: cole sua própria chave do OpenRouter para acesso direto. Há limites de uso; modelos pagos nunca são usados.",
   "settings.providerCompat": "Usa o protocolo compatível com OpenAI.",
   "settings.model": "Modelo",
   "settings.modelHint": "A janela de contexto e os limites de saída se ajustam automaticamente ao modelo.",

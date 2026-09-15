@@ -13,6 +13,7 @@ export const PROVIDER_IDS = [
   "groq",
   "ollama",
   "openai-compatible",
+  "free",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -97,6 +98,15 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     defaultModel: "gpt-4o-mini",
     envVars: ["OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL"],
     requiresApiKey: true,
+  },
+  // No key needed: without one, requests go through the Archymedes free gateway. An optional
+  // OpenRouter key goes direct to OpenRouter instead. See src/main/agent/free-adapter.ts.
+  free: {
+    id: "free",
+    label: "Free models (no key needed)",
+    defaultModel: "openrouter/free",
+    envVars: [],
+    requiresApiKey: false,
   },
 };
 

@@ -5,7 +5,7 @@ import type { ProviderId } from "./providers";
 
 /** Catalog price for a provider/model, or undefined when unpriced. */
 export function catalogPricesOf(provider: ProviderId, model: string, asOf?: string): TokenPrices | undefined {
-  if (provider === "ollama") return tokenPrices("USD", 0, 0, 0);
+  if (provider === "ollama" || provider === "free") return tokenPrices("USD", 0, 0, 0);
   const record = selectPrice(PRICE_CATALOG, { provider, model, asOf });
   return record && record.billingUnit === "tokens" ? tokenPricesFor(record) : undefined;
 }

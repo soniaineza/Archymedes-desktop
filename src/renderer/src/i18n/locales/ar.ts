@@ -216,6 +216,7 @@ export const ar: Messages = {
   "settings.provider": "المزوّد",
   "settings.providerAnthropic": "يستخدم Anthropic Messages API مع التخزين المؤقت للمطالبات.",
   "settings.providerOllama": "يعمل محليًا. لا يحتاج إلى مفتاح API، بل إلى خادم Ollama قيد التشغيل فقط.",
+  "settings.providerFree": "نماذج أدوات مجانية بلا حاجة إلى مفتاح. اختياريًا: الصق مفتاح OpenRouter الخاص بك للاتصال المباشر. تُطبَّق حدود للاستخدام، ولا تُستخدم النماذج المدفوعة أبدًا.",
   "settings.providerCompat": "يستخدم البروتوكول المتوافق مع OpenAI.",
   "settings.model": "النموذج",
   "settings.modelHint": "تتكيّف نافذة السياق وحدود المخرجات مع النموذج تلقائيًا.",
