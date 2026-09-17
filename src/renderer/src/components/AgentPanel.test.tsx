@@ -114,4 +114,21 @@ describe("AgentPanel", () => {
 
     await waitFor(() => expect(composer()).toHaveValue("look at @src/app/App.tsx "));
   });
+  it("shows a pending shell command and sends the user's decision", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    emit(
+      { type: "status", status: "awaiting-approval" },
+      { type: "approval-request", requestId: "approval-1", toolCallId: "call-1", command: "rm build && npm run release" },
+    );
+
+    const card = screen.getByRole("alertdialog", { name: "Run this command?" });
+    expect(card).toHaveTextContent("rm build && npm run release");
+
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+
+    expect(fakeApi().approveCommand).toHaveBeenCalledWith("approval-1", "deny");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
 });

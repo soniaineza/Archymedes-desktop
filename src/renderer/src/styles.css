@@ -2856,3 +2856,21 @@ button.callout {
 .diff-expand:hover {
   background: var(--hover, rgba(128, 128, 128, 0.12));
 }
+
+/* Shell command approval: the command itself must be readable and never wrap into ambiguity. */
+.approval-command {
+  align-self: stretch;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ApprovalDecision,
   ChatMessage,
   EditSummary,
   FileDiff,
@@ -34,6 +35,7 @@ export interface IpcInvokeMap {
 
   "agent:send": { args: [history: ChatMessage[]]; result: void };
   "agent:cancel": { args: []; result: void };
+  "agent:approve": { args: [requestId: string, decision: ApprovalDecision]; result: void };
 
   "git:get-info": { args: []; result: GitInfo };
   "search:workspace": { args: [query: string, caseSensitive?: boolean]; result: SearchResult };
@@ -100,6 +102,7 @@ export interface ArchymedesApi {
   // agent
   sendAgentMessage: Invoke<"agent:send">;
   cancelAgent: Invoke<"agent:cancel">;
+  approveCommand: Invoke<"agent:approve">;
   onAgentEvent: Subscribe<"agent:event">;
 
   // git / search / symbols

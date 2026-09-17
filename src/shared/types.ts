@@ -54,7 +54,22 @@ export type AgentStatus =
   | "thinking"
   | "calling-tool"
   | "awaiting-model"
+  | "awaiting-approval"
   | "error";
+
+/** Whether the agent asks before each shell command. File edits are recorded and revertable; commands are not. */
+export type CommandApprovalMode = "ask" | "auto";
+
+export function isCommandApprovalMode(value: string): value is CommandApprovalMode {
+  return value === "ask" || value === "auto";
+}
+
+/** The user's answer to one command: this once, this exact command from now on, or not at all. */
+export type ApprovalDecision = "allow" | "allow-always" | "deny";
+
+export function isApprovalDecision(value: string): value is ApprovalDecision {
+  return value === "allow" || value === "allow-always" || value === "deny";
+}
 
 export interface ProviderSettings {
   /** Which adapter to use. */
@@ -74,6 +89,8 @@ export interface ProviderSettings {
   terminalShell: TerminalShellChoice;
   /** Executable path used when terminalShell is "custom". */
   terminalShellPath: string;
+  /** "ask" (default) shows each shell command for approval before it runs. */
+  commandApproval: CommandApprovalMode;
 }
 
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
@@ -87,6 +104,7 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   responseLanguage: "",
   terminalShell: "default",
   terminalShellPath: "",
+  commandApproval: "ask",
 };
 
 /** Running cost accounting, streamed with each model turn. */
@@ -217,6 +235,8 @@ export type AgentEvent =
   | { type: "tool-result"; toolCallId: string; result: string; isError: boolean }
   | { type: "message-end"; id: string }
   | { type: "cost"; cost: CostInfo }
+  | { type: "approval-request"; requestId: string; toolCallId: string; command: string }
+  | { type: "approval-resolved"; requestId: string; decision: ApprovalDecision }
   | { type: "done" }
   | { type: "error"; message: string; code?: AppErrorCode; params?: AppErrorParams };
 

@@ -3,6 +3,7 @@ import { parseAppError } from "@shared/app-error";
 import type { AppErrorInfo } from "@shared/app-error";
 import type {
   AgentEvent,
+  ApprovalDecision,
   AgentStatus,
   ChatMessage,
   CostInfo,
@@ -35,6 +36,13 @@ function withoutQueued(messages: ChatMessage[]): ChatMessage[] {
 
 const isBusy = (status: AgentStatus): boolean => status !== "idle" && status !== "error";
 
+/** A shell command the agent is waiting to run until the user decides. */
+export interface PendingApproval {
+  requestId: string;
+  toolCallId: string;
+  command: string;
+}
+
 export function useAgent(options: { onRunFinished?: () => void } = {}) {
   const [session, setSession] = useState<SessionData>(newSession);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -42,6 +50,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
   const [error, setError] = useState<AppErrorInfo | null>(null);
   const [usage, setUsage] = useState<CostInfo | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
+  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [dirtyFlag, setDirtyFlag] = useState(0); // bump to trigger session-list refresh
 
   const sessionRef = useRef<SessionData>(session);
@@ -117,12 +126,20 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       case "cost":
         setUsage(event.cost);
         break;
+      case "approval-request":
+        setApprovals((list) => [...list, { requestId: event.requestId, toolCallId: event.toolCallId, command: event.command }]);
+        break;
+      case "approval-resolved":
+        setApprovals((list) => list.filter((a) => a.requestId !== event.requestId));
+        break;
       case "done":
         setStatus("idle");
+        setApprovals([]);
         break;
       case "error":
         setError({ message: event.message, code: event.code, params: event.params });
         setStatus("error");
+        setApprovals([]);
         break;
     }
   }, []);
@@ -198,6 +215,12 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
     void window.archymedes.cancelAgent();
   }, []);
 
+  const decide = useCallback((requestId: string, decision: ApprovalDecision) => {
+    // Removed at once so a double click cannot answer twice; the main process confirms with approval-resolved.
+    setApprovals((list) => list.filter((a) => a.requestId !== requestId));
+    void window.archymedes.approveCommand(requestId, decision);
+  }, []);
+
   const reset = useCallback(() => {
     setSession(newSession());
     setStatus("idle");
@@ -244,8 +267,10 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
     error,
     usage,
     queue,
+    approvals,
     send,
     cancel,
+    decide,
     reset,
     switchTo,
     removeSession,

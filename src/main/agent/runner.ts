@@ -22,6 +22,22 @@ export interface RunnerDeps {
   /** Records a file's content before the agent changes it, for diff and revert. */
   recordSnapshot(workspace: string, relPath: string): Promise<void>;
   executeTool?: ToolExecutor;
+  /**
+   * Asked before each run_command when settings.commandApproval is "ask". The app always supplies
+   * one (see services.ts); tests that omit it run commands directly, as "auto" mode does.
+   */
+  approveCommand?(call: { toolCallId: string; command: string }, signal: AbortSignal): Promise<boolean>;
+}
+
+export const COMMAND_DECLINED = "The user declined to run this command. Do not run it again; explain what you wanted it for or take another approach.";
+
+function commandOf(argsJson: string): string {
+  try {
+    const parsed = JSON.parse(argsJson || "{}") as { command?: unknown };
+    return typeof parsed.command === "string" ? parsed.command : "";
+  } catch {
+    return "";
+  }
 }
 
 const SYSTEM_PROMPT = `You are Archymedes, a coding agent working inside the user's workspace.
@@ -233,6 +249,16 @@ export class AgentRunner {
             results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result: "(cancelled)", isError: true });
             this.emit({ type: "tool-result", toolCallId: call.toolCallId, result: "(cancelled)", isError: true });
             continue;
+          }
+          if (call.name === "run_command" && this.settings.commandApproval !== "auto" && this.deps.approveCommand) {
+            const approved = await this.deps.approveCommand({ toolCallId: call.toolCallId, command: commandOf(call.args) }, this.controller.signal);
+            if (!approved) {
+              const result = this.controller.signal.aborted ? "(cancelled)" : COMMAND_DECLINED;
+              results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result, isError: true });
+              this.emit({ type: "tool-result", toolCallId: call.toolCallId, result, isError: true });
+              continue;
+            }
+            this.emit({ type: "status", status: "calling-tool" });
           }
           const { output, isError } = await runTool(call.name, call.args, toolContext);
           results.push({ toolCallId: call.toolCallId, name: call.name, args: call.args, result: output, isError });

@@ -1,8 +1,8 @@
 import { AppError } from "./app-error";
 import type { InvokeArgs, InvokeChannel, IpcSendMap, SendChannel } from "./ipc-contract";
 import { isProviderId } from "./providers";
-import type { ChatMessage, ChatRole, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
-import { isTerminalShellChoice } from "./types";
+import type { ApprovalDecision, ChatMessage, ChatRole, CommandApprovalMode, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
+import { isApprovalDecision, isCommandApprovalMode, isTerminalShellChoice } from "./types";
 
 /**
  * Shape checks for everything the renderer sends to the main process. They
@@ -96,7 +96,19 @@ export const providerSettings: Guard<ProviderSettings> = (v, name) => {
     responseLanguage: str(o.responseLanguage, `${name}.responseLanguage`),
     terminalShell: terminalShellChoice(o.terminalShell, `${name}.terminalShell`),
     terminalShellPath: str(o.terminalShellPath, `${name}.terminalShellPath`),
+    // Settings saved before approvals existed have no field; they get the safe default.
+    commandApproval: o.commandApproval === undefined ? "ask" : commandApprovalMode(o.commandApproval, `${name}.commandApproval`),
   };
+};
+
+const commandApprovalMode: Guard<CommandApprovalMode> = (v, name) => {
+  const s = str(v, name);
+  return isCommandApprovalMode(s) ? s : invalid(name, "\"ask\" or \"auto\"");
+};
+
+const approvalDecision: Guard<ApprovalDecision> = (v, name) => {
+  const s = str(v, name);
+  return isApprovalDecision(s) ? s : invalid(name, "allow, allow-always or deny");
 };
 
 const terminalShellChoice: Guard<TerminalShellChoice> = (v, name) => {
@@ -138,6 +150,7 @@ export const INVOKE_GUARDS: InvokeGuards = {
 
   "agent:send": ([history]) => [chatHistory(history, "history")],
   "agent:cancel": none("agent:cancel"),
+  "agent:approve": ([requestId, decision]) => [nonEmpty(requestId, "requestId"), approvalDecision(decision, "decision")],
 
   "git:get-info": none("git:get-info"),
   "search:workspace": ([query, caseSensitive]) => [str(query, "query"), caseSensitive === undefined ? false : bool(caseSensitive, "caseSensitive")],

@@ -57,6 +57,7 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
         await agent.start(settings, root, history, (event) => bridge.emit("agent:event", event));
       },
       "agent:cancel": () => agent.cancel(),
+      "agent:approve": (requestId, decision) => services.approvals.resolve(requestId, decision),
 
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),

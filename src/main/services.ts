@@ -1,4 +1,5 @@
 import { createAdapter } from "./agent/adapters";
+import { CommandApprovals } from "./agent/approvals";
 import { AgentRunController } from "./agent/run-controller";
 import { AgentRunner } from "./agent/runner";
 import type { AdapterFactory } from "./agent/runner";
@@ -21,6 +22,8 @@ export interface AppServices {
   readonly workspace: WorkspaceSession;
   readonly snapshots: SnapshotStore;
   readonly agent: Pick<AgentRunController, "start" | "cancel">;
+  /** Pending shell-command approvals, answered from the renderer. */
+  readonly approvals: Pick<CommandApprovals, "resolve" | "denyAll">;
   readonly watcher: Pick<WorkspaceWatcher, "start" | "stop">;
   readonly terminals: Pick<TerminalManager, "create" | "write" | "resize" | "kill" | "onExit" | "disposeAll">;
   /** Cancels the agent run, stops watching and kills every shell. Safe to call more than once. */
@@ -35,6 +38,7 @@ export type ServiceOverrides = Partial<Pick<AppServices, "workspace" | "agent" |
 export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}): AppServices {
   const workspace = overrides.workspace ?? new WorkspaceSession();
   const snapshots = new SnapshotStore(paths.userData);
+  const approvals = new CommandApprovals();
   const agent =
     overrides.agent ??
     new AgentRunController(
@@ -42,6 +46,7 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
         new AgentRunner(settings, root, emit, {
           createAdapter: overrides.createAdapter ?? createAdapter,
           recordSnapshot: (workspaceRoot, relPath) => snapshots.recordBefore(workspaceRoot, relPath),
+          approveCommand: (call, signal) => approvals.request({ ...call, workspace: root, emit, signal }),
         }),
     );
   const watcher = overrides.watcher ?? new WorkspaceWatcher();
@@ -52,10 +57,12 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
     workspace,
     snapshots,
     agent,
+    approvals,
     watcher,
     terminals,
     dispose() {
       agent.cancel();
+      approvals.denyAll();
       watcher.stop();
       terminals.disposeAll();
     },

@@ -471,6 +471,29 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
         )}
         {notice === "sessions" && <div className="notice-card">{t("agent.sessionsNotice")}</div>}
 
+        {agent.approvals.map((approval) => (
+          <div key={approval.requestId} className="callout warn approval" role="alertdialog" aria-label={t("agent.approval.title")}>
+            <Icon name="alert" size={15} />
+            <div className="callout-body">
+              <div>{t("agent.approval.title")}</div>
+              <pre className="approval-command" dir="ltr">
+                {approval.command}
+              </pre>
+              <div className="approval-actions">
+                <button className="btn primary small" onClick={() => agent.decide(approval.requestId, "allow")}>
+                  {t("agent.approval.allow")}
+                </button>
+                <button className="btn small" onClick={() => agent.decide(approval.requestId, "allow-always")}>
+                  {t("agent.approval.always")}
+                </button>
+                <button className="btn danger small" onClick={() => agent.decide(approval.requestId, "deny")}>
+                  {t("agent.approval.deny")}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+
         {error && (
           <div className="callout error" role="alert">
             <Icon name="alert" size={15} />

@@ -49,6 +49,7 @@ const api: ArchymedesApi = {
 
   sendAgentMessage: (...args) => invoke("agent:send", ...args),
   cancelAgent: () => invoke("agent:cancel"),
+  approveCommand: (...args) => invoke("agent:approve", ...args),
   onAgentEvent: (handler) => subscribe("agent:event", handler),
 
   getGitInfo: () => invoke("git:get-info"),

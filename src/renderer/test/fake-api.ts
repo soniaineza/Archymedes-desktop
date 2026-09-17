@@ -31,6 +31,7 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
 
     sendAgentMessage: vi.fn(async () => {}),
     cancelAgent: vi.fn(async () => {}),
+    approveCommand: vi.fn(async () => {}),
     onAgentEvent: (handler) => {
       agentListeners.add(handler);
       return () => {

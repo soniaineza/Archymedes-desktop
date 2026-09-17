@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULT_PROVIDER_SETTINGS, PRICE_CATALOG_CURRENCY, TERMINAL_SHELL_CHOICES } from "@shared/types";
-import type { ProviderSettings, TerminalShellChoice } from "@shared/types";
+import type { CommandApprovalMode, ProviderSettings, TerminalShellChoice } from "@shared/types";
 import { PROVIDER_IDS, PROVIDER_INFO } from "@shared/providers";
 import type { ProviderId } from "@shared/providers";
 import { Icon } from "./Icon";
@@ -305,6 +305,17 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                   placeholder={PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder")}
                   onChange={(e) => update("baseUrl", e.target.value)}
                 />
+              </Field>
+              <Field label={t("settings.commandApproval")} hint={t("settings.commandApprovalHint")} htmlFor="command-approval">
+                <select
+                  id="command-approval"
+                  className="input"
+                  value={settings.commandApproval}
+                  onChange={(e) => update("commandApproval", e.target.value as CommandApprovalMode)}
+                >
+                  <option value="ask">{t("settings.commandApprovalAsk")}</option>
+                  <option value="auto">{t("settings.commandApprovalAuto")}</option>
+                </select>
               </Field>
               <Field label={t("settings.maxIterations")} hint={t("settings.maxIterationsHint")} htmlFor="max-iterations">
                 <input
