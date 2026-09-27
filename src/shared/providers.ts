@@ -99,11 +99,12 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     envVars: ["OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL"],
     requiresApiKey: true,
   },
-  // No key needed: without one, requests go through the Archymedes free gateway. An optional
-  // OpenRouter key goes direct to OpenRouter instead. See src/main/agent/free-adapter.ts.
+  // No OpenRouter key: requests need a free gateway at Base URL or ARCHYMEDES_FREE_GATEWAY_URL
+  // (the hosted public gateway is not generally available yet). An OpenRouter key goes direct.
+  // See src/main/agent/free-adapter.ts.
   free: {
     id: "free",
-    label: "Free models (no key needed)",
+    label: "Free models (OpenRouter)",
     defaultModel: "openrouter/free",
     envVars: [],
     requiresApiKey: false,

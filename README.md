@@ -23,7 +23,8 @@ snapshotted, diffable, and revertible.
 - **Costs** — live spend in your currency, priced from the CLI's dated
   per-model catalog with cached-token discounts; unpriced models say so
 - **9 providers** — Anthropic, OpenAI, Gemini, Grok, DeepSeek, Mistral, Groq,
-  Ollama (local), any OpenAI-compatible endpoint
+  Ollama (local), any OpenAI-compatible endpoint — plus free OpenRouter models
+  with your own `OPENROUTER_API_KEY`
 - **5 themes** — monochrome dark/light, Solarized dark/light, high contrast
 
 ## Quick start
