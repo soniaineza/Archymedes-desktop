@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archymedes — the coding agent you can inspect</title>
+<meta name="description" content="An open-source coding agent for your terminal and desktop. Guarded execution, recoverable edits, explicit cost, durable history. Your keys, your machine.">
+<meta property="og:title" content="Archymedes — the coding agent you can inspect">
+<meta property="og:description" content="Guarded execution, recoverable edits, explicit cost, durable history. Your keys, your machine, your terminal.">
+<style>
+  :root {
+    --bg: #191714;            /* charcoal */
+    --bg-raised: #221f1b;
+    --bg-deep: #12100e;
+    --limestone: #e8e2d6;     /* primary text */
+    --limestone-dim: #a89f8f; /* secondary text */
+    --bronze: #b08d57;        /* accent */
+    --bronze-bright: #d4a86a;
+    --olive: #7a8464;         /* success/positive */
+    --line: #2e2a25;
+    --code-bg: #12100e;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--limestone);
+    font: 16px/1.65 ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, kbd {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  a { color: var(--bronze-bright); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .02em; }
+  .ring {
+    width: 26px; height: 26px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, var(--bg) 0 4px, transparent 4px),
+      conic-gradient(var(--bronze) 0 40%, #8a6d42 40% 70%, var(--olive) 70% 100%);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--line);
+  }
+  nav .links { display: flex; gap: 24px; font-size: 14.5px; }
+  nav .links a { color: var(--limestone-dim); }
+  nav .links a:hover { color: var(--limestone); text-decoration: none; }
+
+  header { padding: 88px 0 64px; text-align: center; }
+  h1 {
+    font-size: clamp(34px, 6vw, 58px); line-height: 1.12;
+    letter-spacing: -0.02em; font-weight: 800;
+  }
+  h1 .accent { color: var(--bronze-bright); }
+  .sub {
+    max-width: 640px; margin: 22px auto 0; color: var(--limestone-dim);
+    font-size: 18px;
+  }
+  .install {
+    display: inline-flex; align-items: center; gap: 14px;
+    margin-top: 34px; padding: 14px 20px;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15.5px; cursor: pointer;
+  }
+  .install .prompt { color: var(--olive); user-select: none; }
+  .install:hover { border-color: var(--bronze); }
+  .cta-row { margin-top: 18px; display: flex; gap: 18px; justify-content: center; font-size: 14.5px; }
+
+  section { padding: 56px 0; }
+  h2 { font-size: 26px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .lede { color: var(--limestone-dim); max-width: 620px; }
+
+  .grid {
+    display: grid; gap: 18px; margin-top: 34px;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  }
+  .card {
+    background: var(--bg-raised); border: 1px solid var(--line); border-radius: 12px;
+    padding: 22px;
+  }
+  .card h3 { font-size: 16.5px; margin-bottom: 8px; color: var(--bronze-bright); }
+  .card p { color: var(--limestone-dim); font-size: 14.5px; }
+
+  pre.term {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 22px 24px; margin-top: 30px; overflow-x: auto;
+    font-size: 14px; line-height: 1.7;
+  }
+  .t-dim { color: var(--limestone-dim); }
+  .t-green { color: var(--olive); }
+  .t-bronze { color: var(--bronze-bright); }
+  .t-red { color: #c07a6a; }
+  .t-white { color: var(--limestone); }
+
+  ol.steps { margin: 26px 0 0 20px; color: var(--limestone-dim); }
+  ol.steps li { margin: 10px 0; }
+  ol.steps code { color: var(--bronze-bright); background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-size: 13.5px; }
+
+  .status {
+    margin-top: 40px; padding: 14px 18px; border: 1px dashed var(--line); border-radius: 10px;
+    color: var(--limestone-dim); font-size: 13.5px;
+  }
+  .status b { color: var(--limestone); }
+
+  footer {
+    border-top: 1px solid var(--line); margin-top: 40px; padding: 28px 0 48px;
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    color: var(--limestone-dim); font-size: 13.5px;
+  }
+  @media (max-width: 640px) { nav .links { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="ring"></span> archymedes</div>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#demo">Demo</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="https://www.npmjs.com/package/archymedes-cli">npm</a>
+      <a href="https://github.com/chrisnkuno/archymedes-cli">GitHub</a>
+    </div>
+  </nav>
+
+  <header>
+    <h1>The coding agent<br>you can <span class="accent">inspect</span>.</h1>
+    <p class="sub">
+      Archymedes reads, edits, and runs commands in your workspace — and shows you everything:
+      guarded execution, recoverable edits, explicit cost, durable history.
+      Your keys, your machine, your terminal.
+    </p>
+    <button class="install" onclick="navigator.clipboard.writeText('npm install -g archymedes-cli')">
+      <span class="prompt">$</span> npm install -g archymedes-cli
+    </button>
+    <div class="cta-row">
+      <a href="#quickstart">Get started →</a>
+      <a href="https://github.com/chrisnkuno/archymedes-cli">Source on GitHub</a>
+    </div>
+  </header>
+
+  <section id="features">
+    <h2>Review before you trust</h2>
+    <p class="lede">An open-source coding agent for the terminal, with an IDE-grade desktop client. Every edit is snapshotted, diffable, and one keystroke from undo.</p>
+    <div class="grid">
+      <div class="card"><h3>Guarded execution</h3><p>Approval modes from “ask me always” to “just run it.” Spawned commands are confined to the workspace. Failed checks are shown as failed — green only means verified.</p></div>
+      <div class="card"><h3>Recoverable edits</h3><p>Every file the agent touches is snapshotted first. <code>/diff</code> shows the unified diff, <code>/undo</code> rolls it back. The desktop client reverts with one click.</p></div>
+      <div class="card"><h3>Explicit cost</h3><p>Live spend in your currency, priced from a dated per-model catalog with cached-token discounts. Models without pricing say so instead of guessing.</p></div>
+      <div class="card"><h3>Durable history</h3><p>Sessions are saved after every tool step, so a killed process resumes where it stopped — not where it started.</p></div>
+      <div class="card"><h3>Your providers, your keys</h3><p>Anthropic, OpenAI, Gemini, Grok, DeepSeek, Mistral, Groq, Ollama (local), any OpenAI-compatible endpoint, and free OpenRouter models with your own key. Keys stay on your machine.</p></div>
+      <div class="card"><h3>16 languages</h3><p>The interface speaks 16 languages out of the box: <code>archymedes --language &lt;code&gt;</code>.</p></div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <h2>See a turn</h2>
+    <p class="lede">A real session shape — request, guarded edits, verification, review — as it renders in the terminal.</p>
+    <pre class="term"><span class="t-dim">$</span> archymedes <span class="t-white">"fix the failing test in src/parser.ts"</span>
+
+<span class="t-dim">◷ planning</span>
+<span class="t-bronze">● edit</span> src/parser.ts        <span class="t-dim">-4 +9</span>  <span class="t-dim">(snapshotted)</span>
+<span class="t-bronze">● bash</span> npm test              <span class="t-dim">approved</span>
+<span class="t-green">✓ 3 passed</span> <span class="t-dim">(2.1s)</span>
+
+<span class="t-green">✓ turn complete</span> <span class="t-dim">— verified by npm test</span> <span class="t-dim">· $0.0142</span>
+<span class="t-dim">review:</span> /task <span class="t-dim">see the whole picture</span> · /diff <span class="t-dim">inspect changes</span> · /undo <span class="t-dim">revert</span></pre>
+  </section>
+
+  <section id="quickstart">
+    <h2>Quickstart</h2>
+    <p class="lede">Node 22+ on macOS, Linux, or Windows.</p>
+    <ol class="steps">
+      <li><code>npm install -g archymedes-cli</code></li>
+      <li>Run <code>archymedes</code> in your project, pick a provider, paste a key — stored locally, nothing proxied. <code>&lt;PROVIDER&gt;_MODEL</code> chooses a model.</li>
+      <li>Give it a task: <i>“fix the failing test in src/parser.ts.”</i></li>
+      <li>Review with <code>/task</code>, inspect with <code>/diff</code>, undo with <code>/undo</code>.</li>
+      <li>Prefer windows? <a href="https://github.com/soniaineza/Archymedes-desktop/releases">Install Archymedes Desktop</a> and open any folder as a workspace.</li>
+    </ol>
+    <div class="status">
+      <b>Honest status:</b> the local, BYOK product is the release. Hosted services
+      (Archymedes Cloud, the hosted free gateway) are in private beta and not part of it.
+      Free mode (<code>--free</code>) needs your own OpenRouter key or a self-hosted gateway.
+    </div>
+  </section>
+
+  <footer>
+    <div>Apache-2.0 · Archymedes began as a fork of the Nova coding agent (MIT)</div>
+    <div>
+      <a href="https://www.npmjs.com/package/archymedes-cli">npm</a> ·
+      <a href="https://github.com/chrisnkuno/archymedes-cli">CLI source</a> ·
+      <a href="https://github.com/soniaineza/Archymedes-desktop">Desktop source</a> ·
+      <a href="https://github.com/chrisnkuno/archymedes-cli/issues">Issues</a>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
