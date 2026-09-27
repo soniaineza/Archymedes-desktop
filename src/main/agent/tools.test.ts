@@ -29,7 +29,10 @@ describe("executeTool", () => {
   it("snapshots a file before overwriting it", async () => {
     await fs.writeFile(path.join(workspace, "a.txt"), "old");
     const outcome = await executeTool("write_file", JSON.stringify({ path: "a.txt", content: "new" }), ctx);
-    expect(outcome).toEqual({ output: "Wrote a.txt (3 bytes).", isError: false });
+    expect(outcome.isError).toBe(false);
+    // The displayed path may carry the OS's spelling of the temp root (8.3 short names
+    // on Windows, /var vs /private/var on macOS); assert the informative tail only.
+    expect(outcome.output.endsWith("a.txt (3 bytes).")).toBe(true);
     expect(snapshots).toEqual([{ relPath: "a.txt", contentAtSnapshot: "old" }]);
     expect(await fs.readFile(path.join(workspace, "a.txt"), "utf8")).toBe("new");
   });

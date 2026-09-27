@@ -52,7 +52,9 @@ describe("realPathWithin", () => {
   it("resolves a plain relative path inside the root", async () => {
     await fs.writeFile(path.join(root, "a.txt"), "hi");
     const resolved = await realPathWithin(root, "a.txt");
-    expect(resolved).toBe(path.join(root, "a.txt"));
+    // Existing files come back OS-canonicalized, which can spell the same directory
+    // differently from `root` (Windows 8.3 short names, macOS /var vs /private/var).
+    expect(resolved).toBe(await fs.realpath(path.join(root, "a.txt")));
   });
 
   it("refuses a lexical .. escape", async () => {
@@ -72,7 +74,7 @@ describe("realPathWithin", () => {
     await fs.writeFile(path.join(root, "sub", "real.txt"), "hi");
     await fs.symlink(path.join(root, "sub", "real.txt"), path.join(root, "link.txt"));
     const resolved = await realPathWithin(root, "link.txt");
-    expect(resolved).toBe(path.join(root, "sub", "real.txt"));
+    expect(resolved).toBe(await fs.realpath(path.join(root, "sub", "real.txt")));
   });
 });
 
