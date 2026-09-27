@@ -25,7 +25,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      - run: npm run package
+      # A defined tag makes electron-builder try to publish on its own; the release step
+      # below owns uploading, so build artifacts only.
+      - run: npm run package -- --publish never
 
       - name: Release
         uses: softprops/action-gh-release@v2
