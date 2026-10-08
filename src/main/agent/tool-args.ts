@@ -43,7 +43,14 @@ function objectFrom(value: unknown): { object: Json; nested: boolean } | undefin
 }
 
 const CLOSERS: Record<string, string> = { "{": "}", "[": "]" };
-const BARE_WORDS: Record<string, string> = { true: "true", false: "false", null: "null", True: "true", False: "false", None: "null" };
+const BARE_WORDS: Record<string, string> = {
+  true: "true",
+  false: "false",
+  null: "null",
+  True: "true",
+  False: "false",
+  None: "null",
+};
 
 /**
  * One pass over almost-JSON: single-quoted strings become double-quoted, raw control characters in

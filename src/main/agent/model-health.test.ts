@@ -39,7 +39,12 @@ describe("ModelHealthStore", () => {
     await store.recordFailure("x/model:free", "HTTP 429");
     await store.recordSuccess("x/model:free");
     const reopened = new ModelHealthStore(file, () => 5_000);
-    expect((await reopened.snapshot())["x/model:free"]).toEqual({ success: 1, failure: 1, updatedAt: 5_000, lastError: "HTTP 429" });
+    expect((await reopened.snapshot())["x/model:free"]).toEqual({
+      success: 1,
+      failure: 1,
+      updatedAt: 5_000,
+      lastError: "HTTP 429",
+    });
 
     await fs.writeFile(file, "{broken");
     const fresh = new ModelHealthStore(file, () => 5_000);

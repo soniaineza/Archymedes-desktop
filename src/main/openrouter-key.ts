@@ -25,9 +25,10 @@ const count = (value: unknown): number | undefined =>
 export function parseKeyInfo(body: unknown): FreeKeyInfo {
   const data = (body as { data?: unknown } | null)?.data;
   const row = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  const daily = row.free_model_daily_requests && typeof row.free_model_daily_requests === "object"
-    ? (row.free_model_daily_requests as Record<string, unknown>)
-    : {};
+  const daily =
+    row.free_model_daily_requests && typeof row.free_model_daily_requests === "object"
+      ? (row.free_model_daily_requests as Record<string, unknown>)
+      : {};
   const isFreeTier = typeof row.is_free_tier === "boolean" ? row.is_free_tier : undefined;
   const used = count(daily.used);
   let limit = count(daily.limit);
@@ -35,7 +36,8 @@ export function parseKeyInfo(body: unknown): FreeKeyInfo {
   // An account that never bought credits has the documented 50/day limit even when the endpoint
   // omits the counter. A paying account's limit depends on how much it bought, so it stays unknown.
   if (limit === undefined && isFreeTier === true) limit = FREE_TIER_DAILY_REQUESTS;
-  if (remaining === undefined && limit !== undefined && used !== undefined) remaining = Math.max(0, limit - used);
+  if (remaining === undefined && limit !== undefined && used !== undefined)
+    remaining = Math.max(0, limit - used);
   return {
     ...(isFreeTier !== undefined ? { isFreeTier } : {}),
     ...(limit !== undefined ? { dailyRequestLimit: limit } : {}),
@@ -52,7 +54,9 @@ export async function checkOpenRouterKey(
   const key = apiKey.trim();
   if (!key) return { ok: false, reason: "empty" };
   // Header values cannot carry control characters; such a "key" was mis-pasted.
-  if (/[\s\u0000-\u001f\u007f]/.test(key)) return { ok: false, reason: "invalid-key" };
+  if ([...key].some((ch) => /\s/.test(ch) || ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) {
+    return { ok: false, reason: "invalid-key" };
+  }
   const timeout = AbortSignal.timeout(options.timeoutMs ?? KEY_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response: Response;
@@ -66,7 +70,8 @@ export async function checkOpenRouterKey(
   } catch {
     return { ok: false, reason: "network" };
   }
-  if (response.status === 401 || response.status === 403) return { ok: false, reason: "invalid-key", status: response.status };
+  if (response.status === 401 || response.status === 403)
+    return { ok: false, reason: "invalid-key", status: response.status };
   if (response.status === 429) return { ok: false, reason: "rate-limited", status: 429 };
   if (!response.ok) return { ok: false, reason: "server", status: response.status };
   try {
@@ -81,11 +86,17 @@ export async function checkOpenRouterKey(
  * since the last fetch are subtracted locally, so the figure moves with each request in between.
  */
 export class KeyInfoService {
-  private cache: { hash: string; at: number; info: FreeKeyInfo | null; since: number } | null = null;
+  private cache: { hash: string; at: number; info: FreeKeyInfo | null; since: number } | null =
+    null;
   private inflight: { hash: string; promise: Promise<FreeKeyInfo | null> } | null = null;
 
   constructor(
-    private readonly options: { fetchImpl?: Fetch; now?: () => number; ttlMs?: number; timeoutMs?: number } = {},
+    private readonly options: {
+      fetchImpl?: Fetch;
+      now?: () => number;
+      ttlMs?: number;
+      timeoutMs?: number;
+    } = {},
   ) {}
 
   private now(): number {
@@ -97,16 +108,26 @@ export class KeyInfoService {
     if (!key) return null;
     const hash = hashOf(key);
     const cached = this.cache;
-    if (cached && cached.hash === hash && this.now() - cached.at < (this.options.ttlMs ?? KEY_INFO_TTL_MS)) return adjust(cached.info, cached.since);
+    if (
+      cached &&
+      cached.hash === hash &&
+      this.now() - cached.at < (this.options.ttlMs ?? KEY_INFO_TTL_MS)
+    )
+      return adjust(cached.info, cached.since);
     if (this.inflight?.hash === hash) return this.inflight.promise;
-    const promise = checkOpenRouterKey(key, { fetchImpl: this.options.fetchImpl, timeoutMs: this.options.timeoutMs }).then((result) => {
-      // A failed lookup is cached too, so a bad network does not mean a request on every refresh.
-      const info = result.ok ? result.info : null;
-      this.cache = { hash, at: this.now(), info, since: 0 };
-      return info;
-    }).finally(() => {
-      if (this.inflight?.promise === promise) this.inflight = null;
-    });
+    const promise = checkOpenRouterKey(key, {
+      fetchImpl: this.options.fetchImpl,
+      timeoutMs: this.options.timeoutMs,
+    })
+      .then((result) => {
+        // A failed lookup is cached too, so a bad network does not mean a request on every refresh.
+        const info = result.ok ? result.info : null;
+        this.cache = { hash, at: this.now(), info, since: 0 };
+        return info;
+      })
+      .finally(() => {
+        if (this.inflight?.promise === promise) this.inflight = null;
+      });
     this.inflight = { hash, promise };
     return promise;
   }
@@ -126,8 +147,12 @@ function adjust(info: FreeKeyInfo | null, since: number): FreeKeyInfo | null {
   if (!info || since === 0) return info;
   return {
     ...info,
-    ...(info.dailyRequestsUsed !== undefined ? { dailyRequestsUsed: info.dailyRequestsUsed + since } : {}),
-    ...(info.dailyRequestsRemaining !== undefined ? { dailyRequestsRemaining: Math.max(0, info.dailyRequestsRemaining - since) } : {}),
+    ...(info.dailyRequestsUsed !== undefined
+      ? { dailyRequestsUsed: info.dailyRequestsUsed + since }
+      : {}),
+    ...(info.dailyRequestsRemaining !== undefined
+      ? { dailyRequestsRemaining: Math.max(0, info.dailyRequestsRemaining - since) }
+      : {}),
   };
 }
 

@@ -9,7 +9,11 @@ const parsed = (raw: string) => {
 
 describe("repairToolArgs", () => {
   it("passes valid JSON through untouched", () => {
-    expect(repairToolArgs('{"path": "a.ts"}')).toEqual({ ok: true, json: '{"path": "a.ts"}', repaired: false });
+    expect(repairToolArgs('{"path": "a.ts"}')).toEqual({
+      ok: true,
+      json: '{"path": "a.ts"}',
+      repaired: false,
+    });
     expect(repairToolArgs("")).toEqual({ ok: true, json: "{}", repaired: false });
   });
 
@@ -19,24 +23,43 @@ describe("repairToolArgs", () => {
   });
 
   it("turns single-quoted strings and bare keys into JSON", () => {
-    expect(parsed("{'path': 'it\\'s.ts', 'note': 'say \"hi\"'}")).toEqual({ path: "it's.ts", note: 'say "hi"' });
-    expect(parsed("{path: 'a.ts', replaceAll: True, offset: None}")).toEqual({ path: "a.ts", replaceAll: true, offset: null });
+    expect(parsed("{'path': 'it\\'s.ts', 'note': 'say \"hi\"'}")).toEqual({
+      path: "it's.ts",
+      note: 'say "hi"',
+    });
+    expect(parsed("{path: 'a.ts', replaceAll: True, offset: None}")).toEqual({
+      path: "a.ts",
+      replaceAll: true,
+      offset: null,
+    });
   });
 
   it("unwraps code-fenced JSON and JSON surrounded by prose", () => {
     expect(parsed('```json\n{"path": "a.ts"}\n```')).toEqual({ path: "a.ts" });
-    expect(parsed('Here are the arguments: {"path": "a.ts"} hope that helps')).toEqual({ path: "a.ts" });
+    expect(parsed('Here are the arguments: {"path": "a.ts"} hope that helps')).toEqual({
+      path: "a.ts",
+    });
   });
 
   it("decodes an object sent as a JSON string, and a self-wrapped call", () => {
     expect(parsed(JSON.stringify(JSON.stringify({ path: "a.ts" })))).toEqual({ path: "a.ts" });
-    expect(parsed('{"name": "read_file", "arguments": "{\\"path\\": \\"a.ts\\"}"}')).toEqual({ path: "a.ts" });
-    expect(parsed('{"name": "read_file", "arguments": {"path": "a.ts"}}')).toEqual({ path: "a.ts" });
+    expect(parsed('{"name": "read_file", "arguments": "{\\"path\\": \\"a.ts\\"}"}')).toEqual({
+      path: "a.ts",
+    });
+    expect(parsed('{"name": "read_file", "arguments": {"path": "a.ts"}}')).toEqual({
+      path: "a.ts",
+    });
   });
 
   it("closes missing braces and escapes raw newlines inside strings", () => {
-    expect(parsed('{"path": "a.ts", "opts": {"limit": 3')).toEqual({ path: "a.ts", opts: { limit: 3 } });
-    expect(parsed('{"path": "a.ts", "content": "line 1\nline 2"}')).toEqual({ path: "a.ts", content: "line 1\nline 2" });
+    expect(parsed('{"path": "a.ts", "opts": {"limit": 3')).toEqual({
+      path: "a.ts",
+      opts: { limit: 3 },
+    });
+    expect(parsed('{"path": "a.ts", "content": "line 1\nline 2"}')).toEqual({
+      path: "a.ts",
+      content: "line 1\nline 2",
+    });
   });
 
   it("refuses what it cannot repair safely", () => {

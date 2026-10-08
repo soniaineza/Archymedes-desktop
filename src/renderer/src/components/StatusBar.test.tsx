@@ -36,4 +36,38 @@ describe("StatusBar token meter", () => {
     await waitFor(() => expect(fakeApi().getDailyUsage).toHaveBeenCalled());
     expect(screen.queryByText(/Today:/)).not.toBeInTheDocument();
   });
+  it("shows free-model requests left on the user's own OpenRouter key", async () => {
+    vi.mocked(fakeApi().getDailyUsage).mockResolvedValue({
+      date: "2026-10-08",
+      tokens: 100,
+      provider: "free",
+      keyInfo: { isFreeTier: true, dailyRequestLimit: 50, dailyRequestsUsed: 46, dailyRequestsRemaining: 4 },
+    });
+    renderWithProviders(bar());
+    const left = await screen.findByText("4 req left today");
+    expect(left.closest(".seg")).toHaveClass("allowance-warn");
+  });
+
+  it("falls back to the free tier's daily limit when OpenRouter gives no count", async () => {
+    vi.mocked(fakeApi().getDailyUsage).mockResolvedValue({
+      date: "2026-10-08",
+      tokens: 0,
+      provider: "free",
+      keyInfo: { isFreeTier: true, dailyRequestLimit: 50 },
+    });
+    renderWithProviders(bar());
+    expect(await screen.findByText("free tier · limit 50/day")).toBeInTheDocument();
+  });
+
+  it("prefers the gateway's requests-left header", async () => {
+    vi.mocked(fakeApi().getDailyUsage).mockResolvedValue({
+      date: "2026-10-08",
+      tokens: 0,
+      provider: "free",
+      allowance: { remainingRequests: 0, resetUtc: "2026-10-09T00:00:00.000Z" },
+    });
+    renderWithProviders(bar());
+    expect((await screen.findByText("0 req left today")).closest(".seg")).toHaveClass("allowance-out");
+    expect(screen.queryByText(/left · resets/)).not.toBeInTheDocument();
+  });
 });

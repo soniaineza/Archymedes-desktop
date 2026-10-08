@@ -149,6 +149,38 @@ describe("AgentRunner token saver and meter", () => {
   });
 });
 
+describe("AgentRunner request allowance", () => {
+  it("takes the finished request off the gateway's requests-left count, but not a refused one", async () => {
+    const recorded: Array<[number, FreeAllowance | undefined]> = [];
+    let refuse = false;
+    const make = () =>
+      new AgentRunner(DEFAULT_PROVIDER_SETTINGS, process.cwd(), () => undefined, {
+        createAdapter: () => ({
+          name: "metered",
+          runTurn: async ({ onEvent }) => {
+            onEvent({ type: "allowance", remainingRequests: 40 });
+            if (refuse) throw new Error("limited");
+            onEvent({ type: "text-delta", delta: "hi" });
+            onEvent({ type: "usage", inputTokens: 10, outputTokens: 5 });
+            onEvent({ type: "finish", stopReason: "end-turn" });
+          },
+        }),
+        recordSnapshot: async () => undefined,
+        recordUsage: async (tokens, allowance) => {
+          recorded.push([tokens, allowance]);
+          return { date: "2026-10-08", tokens };
+        },
+      });
+    await make().run([{ id: "u1", role: "user", content: "hi" }]);
+    refuse = true;
+    await make().run([{ id: "u1", role: "user", content: "hi" }]);
+    expect(recorded.map(([tokens, allowance]) => [tokens, allowance?.remainingRequests])).toEqual([
+      [15, 39],
+      [0, 40],
+    ]);
+  });
+});
+
 describe("AgentRunner in free mode: fewer requests, tolerant tool calls", () => {
   /** Answers the first request with the given tool calls, then ends; records what each request saw. */
   function twoStep(calls: { toolCallId: string; name: string; args: string }[], seen: { systemPrompt: string; turns: RuntimeTurn[] }[]): AgentAdapter {

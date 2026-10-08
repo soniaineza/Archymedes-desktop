@@ -33,8 +33,9 @@ describe("SettingsModal", () => {
     renderModal();
 
     await user.click(screen.getByRole("tab", { name: "Model provider" }));
-    // The default is keyless free mode.
-    expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "Not required");
+    // The default, free mode, asks for an OpenRouter key in its own setup card.
+    expect(await screen.findByLabelText("OpenRouter API key")).toBeInTheDocument();
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Provider"), "anthropic");
     expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "Paste your key");
     await user.selectOptions(screen.getByLabelText("Provider"), "ollama");
@@ -159,6 +160,53 @@ describe("SettingsModal", () => {
       await openProviderTab("openrouter");
       expect(await screen.findByText("Add an API key to also list the provider's live models. You can type any model ID.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Refresh model list" })).toBeDisabled();
+    });
+  });
+  describe("free mode setup", () => {
+    async function openProvider() {
+      const user = userEvent.setup();
+      const rendered = renderModal();
+      await waitFor(() => expect(fakeApi().getSettings).toHaveBeenCalled());
+      await user.click(screen.getByRole("tab", { name: "Model provider" }));
+      return { user, ...rendered };
+    }
+
+    it("explains free mode, links to OpenRouter's key page, and tucks Base URL under Advanced", async () => {
+      const { user } = await openProvider();
+      expect(
+        screen.getByText("Free mode uses free AI models through OpenRouter. Until the Archymedes free service is live you need a free OpenRouter key."),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Get a free key" }));
+      expect(fakeApi().openExternal).toHaveBeenCalledWith("https://openrouter.ai/keys");
+      const baseUrl = screen.getByLabelText("Base URL");
+      expect(baseUrl.closest("details")).not.toHaveAttribute("open");
+      expect(screen.getByText("Advanced")).toBeInTheDocument();
+    });
+
+    it("saves a new key only after a successful live test", async () => {
+      const { user, onSaved } = await openProvider();
+      await user.type(screen.getByLabelText("OpenRouter API key"), "sk-or-v1-good");
+      const save = screen.getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+
+      await user.click(screen.getByRole("button", { name: "Test key" }));
+      expect(fakeApi().checkFreeKey).toHaveBeenCalledWith("sk-or-v1-good");
+      expect(await screen.findByText("Key works — free tier, 50 requests/day")).toBeInTheDocument();
+      expect(save).toBeEnabled();
+      await user.click(save);
+      await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ provider: "free", apiKey: "sk-or-v1-good" })));
+    });
+
+    it("shows why a key failed, and allows an explicit Save anyway", async () => {
+      vi.mocked(fakeApi().checkFreeKey).mockResolvedValue({ ok: false, reason: "invalid-key", status: 401 });
+      const { user } = await openProvider();
+      await user.type(screen.getByLabelText("OpenRouter API key"), "sk-or-v1-bad");
+      await user.click(screen.getByRole("button", { name: "Test key" }));
+      expect(await screen.findByText("OpenRouter rejected this key. Check that you copied all of it (it starts with sk-or-).")).toBeInTheDocument();
+      const save = screen.getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Save anyway" }));
+      expect(save).toBeEnabled();
     });
   });
 });

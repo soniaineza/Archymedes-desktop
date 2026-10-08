@@ -44,12 +44,22 @@ function parse(text: string): HealthFile {
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
     const row = value as Partial<ModelHealthRecord> | null;
     const ok = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
-    if (!row || typeof id !== "string" || id.length > 200 || !ok(row.success) || !ok(row.failure) || !ok(row.updatedAt)) continue;
+    if (
+      !row ||
+      typeof id !== "string" ||
+      id.length > 200 ||
+      !ok(row.success) ||
+      !ok(row.failure) ||
+      !ok(row.updatedAt)
+    )
+      continue;
     out[id] = {
       success: row.success,
       failure: row.failure,
       updatedAt: row.updatedAt,
-      ...(typeof row.lastError === "string" ? { lastError: row.lastError.slice(0, MAX_ERROR_CHARS) } : {}),
+      ...(typeof row.lastError === "string"
+        ? { lastError: row.lastError.slice(0, MAX_ERROR_CHARS) }
+        : {}),
     };
   }
   return out;
@@ -119,7 +129,8 @@ export class ModelHealthStore {
   }
 
   private prune(state: HealthFile, now: number): void {
-    for (const [id, record] of Object.entries(state)) if (now - record.updatedAt > FORGET_AFTER_MS) delete state[id];
+    for (const [id, record] of Object.entries(state))
+      if (now - record.updatedAt > FORGET_AFTER_MS) delete state[id];
     const ids = Object.keys(state);
     if (ids.length <= MAX_MODELS) return;
     ids.sort((a, b) => state[a].updatedAt - state[b].updatedAt);
@@ -127,18 +138,20 @@ export class ModelHealthStore {
   }
 
   private persist(state: HealthFile): Promise<void> {
-    const next = this.writing.catch(() => undefined).then(async () => {
-      const file = await this.target();
-      if (!file) return;
-      try {
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        const temp = `${file}.${process.pid}.tmp`;
-        await fs.writeFile(temp, JSON.stringify(state, null, 2), "utf8");
-        await fs.rename(temp, file);
-      } catch {
-        // Ordering hints are not worth failing a run over.
-      }
-    });
+    const next = this.writing
+      .catch(() => undefined)
+      .then(async () => {
+        const file = await this.target();
+        if (!file) return;
+        try {
+          await fs.mkdir(path.dirname(file), { recursive: true });
+          const temp = `${file}.${process.pid}.tmp`;
+          await fs.writeFile(temp, JSON.stringify(state, null, 2), "utf8");
+          await fs.rename(temp, file);
+        } catch {
+          // Ordering hints are not worth failing a run over.
+        }
+      });
     this.writing = next;
     return next;
   }
@@ -147,7 +160,9 @@ export class ModelHealthStore {
 /** `<userData>/free-model-health.json`, resolved through Electron when it is available. */
 export async function userDataHealthFile(): Promise<string | undefined> {
   try {
-    const electron = (await import("electron")) as unknown as { app?: { getPath?(name: string): string } };
+    const electron = (await import("electron")) as unknown as {
+      app?: { getPath?(name: string): string };
+    };
     const userData = electron.app?.getPath?.("userData");
     return userData ? path.join(userData, "free-model-health.json") : undefined;
   } catch {

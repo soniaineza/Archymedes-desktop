@@ -9,8 +9,9 @@ import type { IconName } from "./Icon";
 import { LanguageSelect } from "./LanguageSelect";
 import { Modal } from "./Modal";
 import { ModelPicker } from "./ModelPicker";
-import { FreeSetupCard, freeKeySavable } from "./FreeSetupCard";
-import type { KeyVerdict } from "./FreeSetupCard";
+import { FreeSetupCard } from "./FreeSetupCard";
+import { freeKeySavable } from "../lib/free-key";
+import type { KeyVerdict } from "../lib/free-key";
 import { ChatPrefsPanel, EditorPrefsPanel, GeneralPrefsSection } from "./PrefsPanels";
 import { useToast } from "./Toasts";
 import { useI18n } from "../i18n/I18nProvider";
@@ -321,48 +322,48 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                 </>
               ) : (
                 <>
-                <Field label={t("settings.apiKey")} htmlFor="api-key">
-                  <div className="input-group">
+                  <Field label={t("settings.apiKey")} htmlFor="api-key">
+                    <div className="input-group">
+                      <input
+                        id="api-key"
+                        className="input mono"
+                        dir="ltr"
+                        type={showKey ? "text" : "password"}
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={settings.apiKey}
+                        placeholder={
+                          PROVIDER_INFO[settings.provider]?.requiresApiKey === false
+                            ? t("settings.apiKeyNotRequired")
+                            : t("settings.apiKeyPlaceholder")
+                        }
+                        onChange={(e) => update("apiKey", e.target.value)}
+                      />
+                      <button
+                        className="icon-btn"
+                        onClick={() => setShowKey((v) => !v)}
+                        aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                        title={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                      >
+                        <Icon name={showKey ? "eyeOff" : "eye"} size={15} />
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label={t("settings.baseUrl")} htmlFor="base-url">
                     <input
-                      id="api-key"
+                      id="base-url"
                       className="input mono"
                       dir="ltr"
-                      type={showKey ? "text" : "password"}
-                      autoComplete="off"
                       spellCheck={false}
-                      value={settings.apiKey}
+                      value={settings.baseUrl}
                       placeholder={
-                        PROVIDER_INFO[settings.provider]?.requiresApiKey === false
-                          ? t("settings.apiKeyNotRequired")
-                          : t("settings.apiKeyPlaceholder")
+                        PROVIDER_INFO[settings.provider]?.requiresBaseUrl
+                          ? t("settings.baseUrlRequired")
+                          : (PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder"))
                       }
-                      onChange={(e) => update("apiKey", e.target.value)}
+                      onChange={(e) => update("baseUrl", e.target.value)}
                     />
-                    <button
-                      className="icon-btn"
-                      onClick={() => setShowKey((v) => !v)}
-                      aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                      title={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                    >
-                      <Icon name={showKey ? "eyeOff" : "eye"} size={15} />
-                    </button>
-                  </div>
-                </Field>
-                <Field label={t("settings.baseUrl")} htmlFor="base-url">
-                  <input
-                    id="base-url"
-                    className="input mono"
-                    dir="ltr"
-                    spellCheck={false}
-                    value={settings.baseUrl}
-                    placeholder={
-                      PROVIDER_INFO[settings.provider]?.requiresBaseUrl
-                        ? t("settings.baseUrlRequired")
-                        : (PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder"))
-                    }
-                    onChange={(e) => update("baseUrl", e.target.value)}
-                  />
-                </Field>
+                  </Field>
                 </>
               )}
               <Field label={t("settings.commandApproval")} hint={t("settings.commandApprovalHint")} htmlFor="command-approval">

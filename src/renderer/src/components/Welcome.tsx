@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState } from "react";
 import type { ProviderSettings } from "@shared/types";
-import { FreeSetupCard, freeKeySavable } from "./FreeSetupCard";
-import type { KeyVerdict } from "./FreeSetupCard";
+import { FreeSetupCard } from "./FreeSetupCard";
+import { freeKeySavable } from "../lib/free-key";
+import type { KeyVerdict } from "../lib/free-key";
 import { Icon } from "./Icon";
 import { useToast } from "./Toasts";
 import { LanguageSelect } from "./LanguageSelect";
