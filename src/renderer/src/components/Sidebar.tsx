@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { EditSummary, FileNode } from "@shared/types";
+import type { EditSummary, FileNode, SessionSummary } from "@shared/types";
 import { Icon } from "./Icon";
 import { useToast } from "./Toasts";
 import { useI18n } from "../i18n/I18nProvider";
@@ -14,7 +14,18 @@ interface Props {
   onOpenSearch: () => void;
   onOpenDiff: (path: string) => void;
   onReverted: (path: string) => void;
+  /** Recent chats (newest first) for the "Chats" section. */
+  chats?: SessionSummary[];
+  currentChatId?: string;
+  onOpenChat?: (id: string) => void;
+  onShowAllChats?: () => void;
+  /** Deletes one chat (asked twice, like every delete in the app). */
+  onDeleteChat?: (id: string) => void;
 }
+
+const SIDEBAR_CHATS = 5;
+// Sessions saved before localization used this literal as their default title.
+const LEGACY_DEFAULT_TITLE = "New chat";
 
 function TreeItem({ node, depth, activePath, onOpenFile }: {
   node: FileNode;
@@ -57,11 +68,20 @@ function TreeItem({ node, depth, activePath, onOpenFile }: {
   );
 }
 
-export function Sidebar({ tree, activePath, editTick, onOpenFile, onOpenSearch, onOpenDiff, onReverted }: Props) {
-  const { t, formatNumber, shortcut } = useI18n();
+export function Sidebar({
+  tree, activePath, editTick, onOpenFile, onOpenSearch, onOpenDiff, onReverted, chats, currentChatId, onOpenChat, onShowAllChats, onDeleteChat,
+}: Props) {
+  const { t, formatNumber, formatRelativeTime, shortcut } = useI18n();
   const notify = useToast();
   const [edits, setEdits] = useState<EditSummary[]>([]);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
+  const [confirmChatId, setConfirmChatId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!confirmChatId) return;
+    const timer = setTimeout(() => setConfirmChatId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmChatId]);
 
   const loadEdits = useCallback(() => {
     void window.archymedes
@@ -161,6 +181,62 @@ export function Sidebar({ tree, activePath, editTick, onOpenFile, onOpenSearch, 
           </div>
         )}
       </section>
+
+      {onOpenChat && (
+        <section className="chats-box" aria-label={t("sidebar.chats")}>
+          <div className="panel-header">
+            <span className="panel-title">{t("sidebar.chats")}</span>
+            <span className="panel-actions">
+              <button
+                className="icon-btn"
+                onClick={onShowAllChats}
+                title={`${t("cmd.chatHistory")} (${shortcut("mod+h")})`}
+                aria-label={t("cmd.chatHistory")}
+              >
+                <Icon name="history" size={14} />
+              </button>
+            </span>
+          </div>
+          {(chats ?? []).length === 0 ? (
+            <div className="empty-note">{t("sessions.empty")}</div>
+          ) : (
+            <div className="chats-list">
+              {(chats ?? []).slice(0, SIDEBAR_CHATS).map((chat) => (
+                <div key={chat.id} className={`chat-row-wrap${chat.id === currentChatId ? " current" : ""}`}>
+                  <button
+                    className={`chat-row${chat.id === currentChatId ? " current" : ""}`}
+                    onClick={() => onOpenChat(chat.id)}
+                    title={chat.title}
+                  >
+                    <Icon name="message" size={13} />
+                    <span className="name" dir="auto">
+                      {chat.title && chat.title !== LEGACY_DEFAULT_TITLE ? chat.title : t("sessions.untitled")}
+                    </span>
+                    <span className="meta">{formatRelativeTime(chat.updatedAt)}</span>
+                  </button>
+                  {onDeleteChat && (
+                    <button
+                      className={`icon-btn danger chat-row-delete${confirmChatId === chat.id ? " confirming" : ""}`}
+                      title={confirmChatId === chat.id ? t("sessions.deleteConfirm") : t("common.delete")}
+                      aria-label={confirmChatId === chat.id ? t("sessions.deleteConfirm") : t("common.delete")}
+                      onClick={() => {
+                        if (confirmChatId === chat.id) {
+                          onDeleteChat(chat.id);
+                          setConfirmChatId(null);
+                        } else {
+                          setConfirmChatId(chat.id);
+                        }
+                      }}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </nav>
   );
 }

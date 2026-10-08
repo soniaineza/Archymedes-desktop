@@ -2,10 +2,15 @@ import { tokenPrices, type TokenPrices } from "./money";
 import { selectPrice } from "./pricing";
 import { PRICE_CATALOG } from "./price-catalog";
 import type { ProviderId } from "./providers";
+import { isFreeModelId } from "../../shared/model-catalog";
 
-/** Catalog price for a provider/model, or undefined when unpriced. */
+/**
+ * Catalog price for a provider/model, or undefined when unpriced. Port of the CLI's `catalogPrices`:
+ * free mode is zero only for a free model id, local inference is always zero.
+ */
 export function catalogPricesOf(provider: ProviderId, model: string, asOf?: string): TokenPrices | undefined {
-  if (provider === "ollama" || provider === "free") return tokenPrices("USD", 0, 0, 0);
+  if (provider === "free") return isFreeModelId(model) ? tokenPrices("USD", 0, 0, 0) : undefined;
+  if (provider === "ollama") return tokenPrices("USD", 0, 0, 0);
   const record = selectPrice(PRICE_CATALOG, { provider, model, asOf });
   return record && record.billingUnit === "tokens" ? tokenPricesFor(record) : undefined;
 }

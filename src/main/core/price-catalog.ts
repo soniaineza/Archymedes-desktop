@@ -42,7 +42,24 @@ const OAI_COMPAT_LABS: PriceRecord[] = [
   tokens("groq", "llama-3.3-70b-versatile", "USD", 0.59, 0.79, undefined, OAI_COMPAT_SOURCE, OAI_COMPAT_VERIFIED),
 ];
 
-export const PRICE_CATALOG: readonly PriceRecord[] = definePrices([...ANTHROPIC, ...OAI_COMPAT_LABS]);
+/**
+ * Non-model meters (the CLI's SERVICES). Not offered as models: `modelsForProvider` only lists
+ * text/token records. Kept so the two catalogs stay record-for-record identical.
+ */
+const SERVICES: PriceRecord[] = [
+  {
+    provider: "exa", model: "search", modality: "search", currency: "USD", billingUnit: "requests", per: 1_000,
+    rates: { request: 7, contents: 1 },
+    source: "exa.ai/pricing (API tab)", effectiveFrom: "2026-08-10",
+  },
+];
 
-/** Providers this build deliberately ships no rates for: report "unpriced", never a guess. */
-export const UNPRICED_PROVIDERS: readonly string[] = ["openai", "openai-compatible"];
+export const PRICE_CATALOG: readonly PriceRecord[] = definePrices([...ANTHROPIC, ...OAI_COMPAT_LABS, ...SERVICES]);
+
+/**
+ * Providers this build deliberately ships no rates for: report "unpriced", never a guess. Same list
+ * as the CLI: OpenAI's catalog is unverified, OpenRouter and Archymedes Cloud route to models whose
+ * price this client cannot know, and a generic endpoint has no catalog. Ollama is priced at zero in
+ * `catalogPricesOf` instead, because local inference is metered by nobody.
+ */
+export const UNPRICED_PROVIDERS: readonly string[] = ["openai", "openrouter", "archymedes-cloud", "openai-compatible"];

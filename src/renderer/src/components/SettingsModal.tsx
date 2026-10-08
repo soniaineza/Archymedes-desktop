@@ -8,6 +8,11 @@ import { Icon } from "./Icon";
 import type { IconName } from "./Icon";
 import { LanguageSelect } from "./LanguageSelect";
 import { Modal } from "./Modal";
+import { ModelPicker } from "./ModelPicker";
+import { FreeSetupCard } from "./FreeSetupCard";
+import { freeKeySavable } from "../lib/free-key";
+import type { KeyVerdict } from "../lib/free-key";
+import { ChatPrefsPanel, EditorPrefsPanel, GeneralPrefsSection } from "./PrefsPanels";
 import { useToast } from "./Toasts";
 import { useI18n } from "../i18n/I18nProvider";
 import { currencyName, listCurrencies } from "../i18n/core";
@@ -25,11 +30,13 @@ interface Props {
   onSaved: (settings: ProviderSettings) => void;
 }
 
-type Tab = "general" | "appearance" | "provider" | "costs" | "terminal";
+type Tab = "general" | "appearance" | "editor" | "chat" | "provider" | "costs" | "terminal";
 
 const TABS: readonly { id: Tab; icon: IconName; label: MessageKey }[] = [
   { id: "general", icon: "sliders", label: "settings.tab.general" },
   { id: "appearance", icon: "palette", label: "settings.tab.appearance" },
+  { id: "editor", icon: "code", label: "settings.tab.editor" },
+  { id: "chat", icon: "message", label: "settings.tab.chat" },
   { id: "provider", icon: "cpu", label: "settings.tab.provider" },
   { id: "costs", icon: "coins", label: "settings.tab.costs" },
   { id: "terminal", icon: "terminal", label: "settings.tab.terminal" },
@@ -89,10 +96,13 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
   const [rateText, setRateText] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadedKey, setLoadedKey] = useState("");
+  const [keyVerdict, setKeyVerdict] = useState<KeyVerdict>("untested");
 
   useEffect(() => {
     void window.archymedes.getSettings().then((loaded) => {
       setSettings(loaded);
+      setLoadedKey(loaded.apiKey);
       setRateText(loaded.exchangeRate > 0 ? String(loaded.exchangeRate) : "");
     });
   }, []);
@@ -117,6 +127,10 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
   const parsedRate = Number(rateText.trim().replace(",", "."));
   const rateValid = rateText.trim() === "" || (Number.isFinite(parsedRate) && parsedRate > 0);
   const needsRate = settings.currency !== PRICE_CATALOG_CURRENCY;
+  const free = settings.provider === "free";
+  const freeKeyChanged = settings.apiKey.trim() !== loadedKey.trim();
+  // A new free-mode key is saved only once it tested fine, or the user chose "Save anyway".
+  const keyBlocked = free && !freeKeySavable(keyVerdict, freeKeyChanged, settings.apiKey);
 
   const save = async () => {
     const next: ProviderSettings = {
@@ -144,7 +158,11 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
         ? t("settings.providerOllama")
         : settings.provider === "free"
           ? t("settings.providerFree")
-          : t("settings.providerCompat");
+          : settings.provider === "openrouter"
+            ? t("settings.providerOpenRouter")
+            : settings.provider === "archymedes-cloud"
+              ? t("settings.providerCloud")
+              : t("settings.providerCompat");
 
   return (
     <Modal onClose={onClose} labelledBy="settings-title" className="settings-modal">
@@ -207,8 +225,12 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                   ))}
                 </div>
               </Field>
+              <GeneralPrefsSection />
             </>
           )}
+
+          {tab === "editor" && <EditorPrefsPanel />}
+          {tab === "chat" && <ChatPrefsPanel />}
 
           {tab === "appearance" && (
             <Field label={t("settings.theme")} hint={t("settings.themeHint")}>
@@ -258,54 +280,92 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
                 </select>
               </Field>
               <Field label={t("settings.model")} hint={t("settings.modelHint")} htmlFor="model">
-                <input
+                <ModelPicker
                   id="model"
-                  className="input mono"
-                  dir="ltr"
-                  spellCheck={false}
+                  provider={settings.provider}
+                  apiKey={settings.apiKey}
+                  baseUrl={settings.baseUrl}
                   value={settings.model}
                   placeholder={PROVIDER_INFO[settings.provider]?.defaultModel}
-                  onChange={(e) => update("model", e.target.value)}
+                  currency={settings.currency}
+                  exchangeRate={settings.exchangeRate}
+                  onChange={(model) => update("model", model)}
                 />
               </Field>
-              <Field label={t("settings.apiKey")} htmlFor="api-key">
-                <div className="input-group">
-                  <input
-                    id="api-key"
-                    className="input mono"
-                    dir="ltr"
-                    type={showKey ? "text" : "password"}
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={settings.apiKey}
-                    placeholder={
-                      PROVIDER_INFO[settings.provider]?.requiresApiKey === false
-                        ? t("settings.apiKeyNotRequired")
-                        : t("settings.apiKeyPlaceholder")
-                    }
-                    onChange={(e) => update("apiKey", e.target.value)}
+              {free ? (
+                <>
+                  <FreeSetupCard
+                    apiKey={settings.apiKey}
+                    onApiKeyChange={(value) => update("apiKey", value)}
+                    onVerdictChange={setKeyVerdict}
+                    needsTest={freeKeyChanged}
                   />
-                  <button
-                    className="icon-btn"
-                    onClick={() => setShowKey((v) => !v)}
-                    aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                    title={showKey ? t("settings.hideKey") : t("settings.showKey")}
-                  >
-                    <Icon name={showKey ? "eyeOff" : "eye"} size={15} />
-                  </button>
-                </div>
-              </Field>
-              <Field label={t("settings.baseUrl")} htmlFor="base-url">
-                <input
-                  id="base-url"
-                  className="input mono"
-                  dir="ltr"
-                  spellCheck={false}
-                  value={settings.baseUrl}
-                  placeholder={PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder")}
-                  onChange={(e) => update("baseUrl", e.target.value)}
-                />
-              </Field>
+                  <details className="settings-advanced" open={Boolean(settings.baseUrl.trim()) || undefined}>
+                    <summary>{t("free.advanced")}</summary>
+                    <Field label={t("settings.baseUrl")} htmlFor="base-url">
+                      <input
+                        id="base-url"
+                        className="input mono"
+                        dir="ltr"
+                        spellCheck={false}
+                        value={settings.baseUrl}
+                        placeholder={
+                          PROVIDER_INFO[settings.provider]?.requiresBaseUrl
+                            ? t("settings.baseUrlRequired")
+                            : (PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder"))
+                        }
+                        onChange={(e) => update("baseUrl", e.target.value)}
+                      />
+                    </Field>
+                    <div className="field-hint">{t("free.baseUrlHint")}</div>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <Field label={t("settings.apiKey")} htmlFor="api-key">
+                    <div className="input-group">
+                      <input
+                        id="api-key"
+                        className="input mono"
+                        dir="ltr"
+                        type={showKey ? "text" : "password"}
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={settings.apiKey}
+                        placeholder={
+                          PROVIDER_INFO[settings.provider]?.requiresApiKey === false
+                            ? t("settings.apiKeyNotRequired")
+                            : t("settings.apiKeyPlaceholder")
+                        }
+                        onChange={(e) => update("apiKey", e.target.value)}
+                      />
+                      <button
+                        className="icon-btn"
+                        onClick={() => setShowKey((v) => !v)}
+                        aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                        title={showKey ? t("settings.hideKey") : t("settings.showKey")}
+                      >
+                        <Icon name={showKey ? "eyeOff" : "eye"} size={15} />
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label={t("settings.baseUrl")} htmlFor="base-url">
+                    <input
+                      id="base-url"
+                      className="input mono"
+                      dir="ltr"
+                      spellCheck={false}
+                      value={settings.baseUrl}
+                      placeholder={
+                        PROVIDER_INFO[settings.provider]?.requiresBaseUrl
+                          ? t("settings.baseUrlRequired")
+                          : (PROVIDER_INFO[settings.provider]?.defaultBaseUrl ?? t("settings.baseUrlPlaceholder"))
+                      }
+                      onChange={(e) => update("baseUrl", e.target.value)}
+                    />
+                  </Field>
+                </>
+              )}
               <Field label={t("settings.commandApproval")} hint={t("settings.commandApprovalHint")} htmlFor="command-approval">
                 <select
                   id="command-approval"
@@ -415,7 +475,8 @@ export function SettingsModal({ theme, scale, onThemeChange, onScaleChange, onCl
         <button className="btn" onClick={onClose}>
           {t("common.cancel")}
         </button>
-        <button className="btn primary" onClick={() => void save()} disabled={saving || !rateValid}>
+        {keyBlocked && <span className="footer-note">{t("free.testBeforeSave")}</span>}
+        <button className="btn primary" onClick={() => void save()} disabled={saving || !rateValid || keyBlocked}>
           {t("common.save")}
         </button>
       </div>

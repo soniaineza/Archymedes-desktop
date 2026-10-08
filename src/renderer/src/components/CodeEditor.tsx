@@ -3,9 +3,11 @@ import type { KeyboardEvent } from "react";
 import type { OpenTab } from "../lib/tabs";
 import { fileName, isDirty } from "../lib/tabs";
 import { fileKind } from "../lib/files";
-import { highlightCode } from "./Highlight";
+import { HighlightLine, langFromPath, languageLabel, tokenizeIncremental } from "./Highlight";
+import type { TokenCache } from "./Highlight";
 import { Icon } from "./Icon";
 import { useI18n } from "../i18n/I18nProvider";
+import { usePrefs } from "../lib/prefs";
 
 interface Props {
   tabs: OpenTab[];
@@ -15,28 +17,22 @@ interface Props {
   onClose: (path: string) => void;
   onSave: (path: string, content: string) => void;
   onChange: (path: string, content: string) => void;
-}
-
-function langOf(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  const map: Record<string, string> = {
-    ts: "ts", tsx: "tsx", js: "ts", jsx: "tsx", mjs: "ts", cjs: "ts",
-    json: "json", css: "css", scss: "scss", html: "html", md: "md",
-    rs: "rust", py: "python", yml: "yaml", yaml: "yaml", toml: "toml",
-    sh: "bash", txt: "text",
-  };
-  return map[ext] ?? "text";
+  /** The text area lost focus (auto save "when focus changes"). */
+  onBlur?: (path: string) => void;
 }
 
 type Transform = (value: string, selStart: number, selEnd: number) => { value: string; selStart: number; selEnd: number };
 
-export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, onSave, onChange }: Props) {
+export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, onSave, onChange, onBlur }: Props) {
   const { t, shortcut } = useI18n();
+  const prefs = usePrefs();
+  const indentUnit = " ".repeat(prefs.editorTabSize);
   const active = tabs.find((tab) => tab.path === activeTab) ?? null;
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const tokenCacheRef = useRef<{ path: string; cache: TokenCache } | null>(null);
 
   const updateCursor = () => {
     const el = taRef.current;
@@ -76,24 +72,14 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
     }
 
     // A truncated tab is read-only: edits here could never be saved in full.
-    if (active?.truncated) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose(active.path);
-      }
-      return;
-    }
-
-    if (e.key === "Escape" && active && isDirty(active)) {
-      e.preventDefault();
-      onClose(active.path);
-      return;
-    }
+    // (Escape is deliberately left alone: it must never close a tab or discard unsaved work.)
+    if (active?.truncated) return;
 
     // Tab / Shift+Tab: indent or outdent
     if (e.key === "Tab") {
       e.preventDefault();
-      const indent = "  ";
+      const indent = indentUnit;
+      const outdent = new RegExp(`^ {1,${indentUnit.length}}|^\\t`);
       if (el.selectionStart !== el.selectionEnd || e.shiftKey) {
         transform((value, s, selEnd) => {
           const lineStart = value.lastIndexOf("\n", s - 1) + 1;
@@ -101,7 +87,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
           const next = value
             .slice(lineStart, lineEnd)
             .split("\n")
-            .map((l) => (e.shiftKey ? l.replace(/^ {1,2}|^\t/, "") : indent + l))
+            .map((l) => (e.shiftKey ? l.replace(outdent, "") : indent + l))
             .join("\n");
           return { value: value.slice(0, lineStart) + next + value.slice(lineEnd), selStart: lineStart, selEnd: lineStart + next.length };
         });
@@ -123,7 +109,7 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
         const currentLine = value.slice(lineStart, s);
         const indent = /^[ \t]*/.exec(currentLine)?.[0] ?? "";
         const opensBlock = /[{[(:]\s*$/.test(currentLine);
-        const insert = "\n" + indent + (opensBlock ? "  " : "");
+        const insert = "\n" + indent + (opensBlock ? indentUnit : "");
         const closes = opensBlock && "})]".includes(value[selEnd] ?? "");
         const out = value.slice(0, s) + insert + (closes ? "\n" + indent : "") + value.slice(selEnd);
         const caret = s + insert.length;
@@ -165,12 +151,18 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
   };
 
   const lineCount = active ? active.content.split("\n").length : 0;
-  const lang = active ? langOf(active.path) : "text";
+  const lang = active ? langFromPath(active.path) : "text";
   // Tokenizing is the editor's hot path; only recompute when file or text changes.
-  const highlighted = useMemo(
-    () => (active ? highlightCode(active.content, lang) : null),
-    [active?.path, active?.content, lang],
-  );
+  // Moving the caret only re-renders the two lines whose "current" flag flips.
+  const tokens = useMemo(() => {
+    if (!active) return [];
+    const cached = tokenCacheRef.current;
+    const result = tokenizeIncremental(active.content, lang, cached?.path === active.path ? cached.cache : null);
+    tokenCacheRef.current = { path: active.path, cache: result.cache };
+    return result.lines;
+  }, [active?.path, active?.content, lang]);
+  const wrapClass = `editor-wrap${prefs.editorWordWrap ? " wrap" : ""}${prefs.editorLineNumbers ? " numbers" : ""}`;
+  const showGutter = prefs.editorLineNumbers && !prefs.editorWordWrap;
 
   return (
     <div className="editor">
@@ -213,18 +205,24 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
 
       {active ? (
         <>
-          <div className="editor-wrap" dir="ltr">
-            <div className="editor-gutter" ref={gutterRef} aria-hidden>
-              {Array.from({ length: lineCount }, (_, i) => (
-                <div key={i} className={`ln${cursor.line === i + 1 ? " current" : ""}`}>
-                  {i + 1}
-                </div>
-              ))}
-            </div>
+          <div className={wrapClass} dir="ltr">
+            {showGutter && (
+              <div className="editor-gutter" ref={gutterRef} aria-hidden>
+                {Array.from({ length: lineCount }, (_, i) => (
+                  <div key={i} className={`ln${cursor.line === i + 1 ? " current" : ""}`}>
+                    {i + 1}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="editor-stack">
               <div className="editor-highlight" ref={hlRef} aria-hidden>
                 <pre>
-                  <code>{highlighted}</code>
+                  <code>
+                    {tokens.map((line, i) => (
+                      <HighlightLine key={i} tokens={line} current={cursor.line === i + 1} />
+                    ))}
+                  </code>
                 </pre>
               </div>
               <textarea
@@ -252,6 +250,8 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
                   syncScroll();
                 }}
                 onScroll={syncScroll}
+                onBlur={() => onBlur?.(active.path)}
+                wrap={prefs.editorWordWrap ? "soft" : "off"}
                 spellCheck={false}
                 aria-label={active.path}
               />
@@ -270,7 +270,9 @@ export function CodeEditor({ tabs, activeTab, activeLine, onActivate, onClose, o
             )}
             {isDirty(active) && <span className="pill">{t("editor.unsaved")}</span>}
             <span className="spacer" />
-            <span>{lang}</span>
+            <span>{languageLabel(lang)}</span>
+            <span>{t("editor.spaces", { count: prefs.editorTabSize })}</span>
+            {prefs.autoSave !== "off" && <span className="pill">{t("editor.autoSaveOn")}</span>}
             <span>{t("editor.position", { line: cursor.line, col: cursor.col })}</span>
             <span>{t("editor.lines", { count: lineCount })}</span>
             <button className="btn small" onClick={() => onSave(active.path, active.content)} disabled={!isDirty(active)}>

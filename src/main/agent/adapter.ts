@@ -38,7 +38,14 @@ export type AdapterEvent =
   | { type: "text-delta"; delta: string }
   | { type: "tool-call"; invocation: ToolInvocation }
   | { type: "finish"; stopReason: "tool-use" | "end-turn" | "error"; errorMessage?: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+  | { type: "usage"; inputTokens: number; outputTokens: number; cachedInputTokens?: number }
+  /** The adapter is retrying (e.g. free mode moving to another model); shown as a status. */
+  | { type: "retry"; reason: string }
+  /**
+   * The free gateway's allowance headers for this request. They describe the state before the
+   * request, so the runner subtracts the tokens the turn then reports.
+   */
+  | { type: "allowance"; remainingTokens?: number; remainingRequests?: number; resetUtc?: string; warning?: string };
 
 // ---------- History entry shapes the adapter consumes ----------
 

@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { highlightCode } from "./Highlight";
+import { highlightCode, langFromPath, languageLabel } from "./Highlight";
+import { DiffRows, parseUnifiedDiff } from "./DiffRows";
 import { Icon } from "./Icon";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -10,16 +11,41 @@ import { useI18n } from "../i18n/I18nProvider";
  * use dir="auto" so right-to-left and left-to-right replies both read naturally.
  */
 
-type Block = { kind: "code"; lang: string; code: string } | { kind: "text"; content: string };
+type Block = { kind: "code"; lang: string; file: string | null; code: string } | { kind: "text"; content: string };
 
-function splitFences(text: string): Block[] {
+/**
+ * Read a fence info string: "ts", "ts title=src/a.ts", "ts:src/a.ts", "tsx filename=\"App.tsx\"",
+ * or just a path like "src/a.ts" (language from its extension).
+ */
+export function parseFenceInfo(info: string): { lang: string; file: string | null } {
+  const trimmed = info.trim();
+  if (!trimmed) return { lang: "text", file: null };
+  const [first = "", ...rest] = trimmed.split(/\s+/);
+  const attrs = rest.join(" ");
+  const named = /(?:title|file|filename|path|name)\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))/i.exec(attrs);
+  let lang = first;
+  let file: string | null = named ? (named[1] ?? named[2] ?? named[3] ?? null) : null;
+  const colon = first.indexOf(":");
+  if (colon > 0) {
+    lang = first.slice(0, colon);
+    file = file ?? (first.slice(colon + 1) || null);
+  } else if (/[./\\]/.test(first) && !/^[\w+#-]+$/.test(first)) {
+    // A bare path: "src/app.ts" or "main.py".
+    file = file ?? first;
+    lang = langFromPath(first);
+  }
+  return { lang: lang || "text", file };
+}
+
+export function splitFences(text: string): Block[] {
   const blocks: Block[] = [];
-  const fence = /```([\w+-]*)[^\n]*\n([\s\S]*?)(?:```|$)/g;
+  const fence = /```([^\n`]*)\n([\s\S]*?)(?:```|$)/g;
   let last = 0;
   let match: RegExpExecArray | null;
   while ((match = fence.exec(text)) !== null) {
     if (match.index > last) blocks.push({ kind: "text", content: text.slice(last, match.index) });
-    blocks.push({ kind: "code", lang: match[1] || "text", code: match[2].replace(/\n$/, "") });
+    const { lang, file } = parseFenceInfo(match[1]);
+    blocks.push({ kind: "code", lang, file, code: match[2].replace(/\n$/, "") });
     last = match.index + match[0].length;
   }
   if (last < text.length) blocks.push({ kind: "text", content: text.slice(last) });
@@ -152,47 +178,64 @@ function renderProse(content: string): ReactNode[] {
 
 const DIFF_COLLAPSE_AFTER = 12;
 
-/** A ```diff/```patch fence rendered as colored before/after with expand/collapse. */
-function DiffBlock({ code }: { code: string }) {
+/** A ```diff/```patch fence: VS Code-style rows with line numbers, syntax colours and expand/collapse. */
+function DiffBlock({ code, file }: { code: string; file: string | null }) {
   const { t } = useI18n();
-  const lines = code.split("\n");
-  const added = lines.filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-  const removed = lines.filter((l) => l.startsWith("-") && !l.startsWith("---"));
-  const [expanded, setExpanded] = useState(lines.length <= DIFF_COLLAPSE_AFTER);
-  const visible = expanded ? lines : lines.slice(0, DIFF_COLLAPSE_AFTER);
-  const hidden = lines.length - visible.length;
+  const { rows, path } = useMemo(() => parseUnifiedDiff(code), [code]);
+  const added = rows.filter((r) => r.kind === "add").length;
+  const removed = rows.filter((r) => r.kind === "del").length;
+  const [expanded, setExpanded] = useState(rows.length <= DIFF_COLLAPSE_AFTER);
+  const visible = expanded ? rows : rows.slice(0, DIFF_COLLAPSE_AFTER);
+  const hidden = rows.length - visible.length;
+  const name = file ?? path;
 
   return (
     <div className="code-block diff-block" dir="ltr">
       <div className="code-block-bar">
-        <span>
-          diff <b className="diff-stat">+{added.length}</b> <b className="diff-stat del">−{removed.length}</b>
+        <span className="code-block-title">
+          <Icon name="diff" size={12} />
+          {name && <bdi className="file">{name}</bdi>}
+          <span>
+            diff <b className="diff-stat">+{added}</b> <b className="diff-stat del">−{removed}</b>
+          </span>
         </span>
         <CopyButton text={code} />
       </div>
       <pre className="diff-lines">
-        <code>
-          {visible.map((line, i) => {
-            const kind = line.startsWith("@@")
-              ? "hunk"
-              : line.startsWith("+") && !line.startsWith("+++")
-                ? "add"
-                : line.startsWith("-") && !line.startsWith("---")
-                  ? "del"
-                  : "ctx";
-            return (
-              <span key={i} className={`diff-line ${kind}`}>
-                {line || " "}
-              </span>
-            );
-          })}
-        </code>
+        <DiffRows rows={visible} path={name} />
       </pre>
       {hidden > 0 && (
         <button className="diff-expand" onClick={() => setExpanded(true)}>
           {t("common.expand", { count: hidden })}
         </button>
       )}
+    </div>
+  );
+}
+
+/** A fenced code block framed like a small editor: title bar (file or language), copy, optional gutter. */
+function CodeBlock({ code, lang, file }: { code: string; lang: string; file: string | null }) {
+  const highlighted = useMemo(() => highlightCode(code, lang), [code, lang]);
+  const label = languageLabel(lang);
+  return (
+    <div className="code-block" dir="ltr">
+      <div className="code-block-bar">
+        <span className="code-block-title">
+          <Icon name="file" size={12} />
+          {file ? (
+            <bdi className="file" title={file}>
+              {file}
+            </bdi>
+          ) : (
+            <span>{label}</span>
+          )}
+          {file && lang !== "text" && <span className="lang">{label}</span>}
+        </span>
+        <CopyButton text={code} />
+      </div>
+      <pre>
+        <code>{highlighted}</code>
+      </pre>
     </div>
   );
 }
@@ -227,17 +270,9 @@ export function MarkdownLite({ text }: { text: string }) {
       {splitFences(text).map((block, i) =>
         block.kind === "code" ? (
           block.lang === "diff" || block.lang === "patch" ? (
-            <DiffBlock key={i} code={block.code} />
+            <DiffBlock key={i} code={block.code} file={block.file} />
           ) : (
-            <div key={i} className="code-block" dir="ltr">
-            <div className="code-block-bar">
-              <span>{block.lang}</span>
-              <CopyButton text={block.code} />
-            </div>
-            <pre>
-              <code>{highlightCode(block.code, block.lang)}</code>
-            </pre>
-          </div>
+            <CodeBlock key={i} code={block.code} lang={block.lang} file={block.file} />
           )
         ) : (
           <Fragment key={i}>{renderProse(block.content)}</Fragment>

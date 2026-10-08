@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { supportsSymlinks } from "../test-support/symlinks";
+import { linkDirectory } from "../test-support/symlinks";
 import { SnapshotStore } from "./snapshots";
 
 let tmp: string;
@@ -117,13 +117,12 @@ describe("SnapshotStore", () => {
     expect(await store.diff(other, "a.txt")).toBeNull();
   });
 
-  it("finds the same snapshots when the workspace is opened through a symlink", async (ctx) => {
-    if (!(await supportsSymlinks())) return ctx.skip();
+  it("finds the same snapshots when the workspace is opened through a symlink", async () => {
     await write("a.txt", "x");
     await store.recordBefore(root, "a.txt");
     await write("a.txt", "y");
     const linked = path.join(tmp, "linked");
-    await fs.symlink(root, linked);
+    await linkDirectory(root, linked);
     expect((await store.listEdits(linked)).map((e) => e.path)).toEqual(["a.txt"]);
   });
 

@@ -109,6 +109,33 @@ describe("useAgent", () => {
     expect(result.current.status).toBe("error");
   });
 
+  it("batches streamed text into few renders and never loses the tail", async () => {
+    const { result } = renderHook(() => useAgent());
+
+    emit({ type: "message-start", id: "m1" });
+    act(() => {
+      for (const delta of ["Hel", "lo ", "wor", "ld"]) fakeApi().emitAgentEvent({ type: "text-delta", id: "m1", delta });
+    });
+    // Applied on the next frame/tick as one update, not once per token.
+    await waitFor(() => expect(result.current.session.messages[0].content).toBe("Hello world"));
+
+    act(() => fakeApi().emitAgentEvent({ type: "text-delta", id: "m1", delta: "!" }));
+    // A following event flushes buffered text synchronously, before it applies.
+    emit({ type: "message-end", id: "m1" });
+    expect(result.current.session.messages[0]).toMatchObject({ content: "Hello world!", pending: false });
+  });
+
+  it("coalesces quick successive saves into one", async () => {
+    const { result } = renderHook(() => useAgent());
+
+    act(() => result.current.send("one"));
+    act(() => result.current.send("two"));
+
+    await waitFor(() => expect(fakeApi().saveSession).toHaveBeenCalledTimes(1));
+    const [saved] = vi.mocked(fakeApi().saveSession).mock.calls[0];
+    expect(saved.messages.map((m) => m.content)).toEqual(["one", "two"]);
+  });
+
   it("attaches tool results to the right tool call", () => {
     const { result } = renderHook(() => useAgent());
 

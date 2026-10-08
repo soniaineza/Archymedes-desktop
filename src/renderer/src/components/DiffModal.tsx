@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FileDiff } from "@shared/types";
+import { DiffRows } from "./DiffRows";
+import type { DiffRow } from "./DiffRows";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
 import { useToast } from "./Toasts";
@@ -48,6 +50,16 @@ export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
   }, [confirming]);
 
   const hasChanges = Boolean(diff && (diff.added > 0 || diff.removed > 0));
+  const rows = useMemo<DiffRow[]>(
+    () =>
+      (diff?.lines ?? []).map((line) => ({
+        kind: line.kind === "context" ? "ctx" : line.kind,
+        text: line.text,
+        oldLine: line.kind === "add" ? undefined : line.oldLine,
+        newLine: line.kind === "del" ? undefined : line.newLine,
+      })),
+    [diff],
+  );
 
   const revert = async () => {
     if (!confirming) {
@@ -111,13 +123,7 @@ export function DiffModal({ path, onClose, onReverted, onOpenFile }: Props) {
       {state === "ready" && !diff && <div className="empty-note padded">{t("diff.noSnapshot")}</div>}
       {diff && (
         <div className="diff-body" dir="ltr">
-          {diff.lines.map((line, i) => (
-            <div key={i} className={`diff-line ${line.kind}`}>
-              <span className="ln">{line.kind === "del" ? (line.oldLine ?? "") : (line.newLine ?? "")}</span>
-              <span className="sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
-              <span className="code">{line.text}</span>
-            </div>
-          ))}
+          {diff.lines.length > 0 && <DiffRows rows={rows} path={path} />}
           {diff.lines.length === 0 && (
             <div className="empty-note padded" dir="auto">
               {t("diff.noChanges")}

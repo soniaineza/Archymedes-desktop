@@ -7,7 +7,9 @@ import type { HostBridge, IpcHost } from "./ipc-host";
 import { workspaceSearch } from "./search";
 import { workspaceSymbols } from "./symbols";
 import type { AppServices } from "./services";
-import { deleteSession, listSessions, loadSession, renameSession, saveSession } from "./sessions";
+import { adoptLegacySessions, deleteAllSessions, deleteSession, listLegacySessions, listSessions, loadSession, renameSession, saveSession } from "./sessions";
+import { checkOpenRouterKey } from "./openrouter-key";
+import { freeEndpoint } from "./agent/free-adapter";
 import { loadSettings, saveSettings } from "./settings";
 import { isTerminalShellChoice } from "../shared/types";
 
@@ -45,7 +47,12 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
 
       // ---------- settings ----------
       "settings:get": () => loadSettings(userData),
-      "settings:save": (settings) => saveSettings(userData, settings),
+      "settings:save": async (settings) => {
+        await saveSettings(userData, settings);
+        // A new key starts a fresh allowance lookup.
+        services.keyInfo.clear();
+      },
+      "models:list": (request) => services.models.list(request),
 
       // ---------- agent ----------
       "agent:send": async (history) => {
@@ -58,6 +65,17 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       },
       "agent:cancel": () => agent.cancel(),
       "agent:approve": (requestId, decision) => services.approvals.resolve(requestId, decision),
+      "usage:get-daily": async () => {
+        const [daily, settings] = await Promise.all([services.usage.snapshot(), loadSettings(userData)]);
+        // Free mode with the user's own key: OpenRouter's count of free-model requests (cached).
+        const keyInfo = settings.provider === "free" && settings.apiKey.trim()
+          ? await services.keyInfo.get(settings.apiKey).catch(() => null)
+          : null;
+        return { ...daily, provider: settings.provider, ...(keyInfo ? { keyInfo } : {}) };
+      },
+      "free:check-key": (apiKey) => checkOpenRouterKey(apiKey),
+      "free:ready": async () => freeEndpoint(await loadSettings(userData)) !== undefined,
+      "shell:open-external": (url) => bridge.openExternal(url),
 
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
@@ -65,11 +83,15 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "symbols:workspace": (query) => workspaceSymbols(workspace.requireRoot(), query),
 
       // ---------- sessions ----------
-      "session:list": () => listSessions(userData),
-      "session:load": (id) => loadSession(userData, id),
-      "session:save": (session) => saveSession(userData, session),
-      "session:delete": (id) => deleteSession(userData, id),
-      "session:rename": (id, title) => renameSession(userData, id, title),
+      // Every session call is scoped to the folder open now; see sessions.ts.
+      "session:list": () => listSessions(userData, workspace.root),
+      "session:load": (id) => loadSession(userData, id, workspace.root),
+      "session:save": (session) => saveSession(userData, session, workspace.root),
+      "session:delete": (id) => deleteSession(userData, id, workspace.root),
+      "session:delete-all": () => deleteAllSessions(userData, workspace.root),
+      "session:rename": (id, title) => renameSession(userData, id, title, workspace.root),
+      "session:legacy": () => listLegacySessions(userData, workspace.root),
+      "session:adopt-legacy": (ids) => adoptLegacySessions(userData, ids, workspace.root),
 
       // ---------- diffs / revert ----------
       "diff:file": (relPath) => services.snapshots.diff(workspace.requireRoot(), relPath),

@@ -46,11 +46,16 @@ const api: ArchymedesApi = {
 
   getSettings: () => invoke("settings:get"),
   saveSettings: (...args) => invoke("settings:save", ...args),
+  listModels: (...args) => invoke("models:list", ...args),
 
   sendAgentMessage: (...args) => invoke("agent:send", ...args),
   cancelAgent: () => invoke("agent:cancel"),
   approveCommand: (...args) => invoke("agent:approve", ...args),
   onAgentEvent: (handler) => subscribe("agent:event", handler),
+  getDailyUsage: () => invoke("usage:get-daily"),
+  checkFreeKey: (...args) => invoke("free:check-key", ...args),
+  isFreeReady: () => invoke("free:ready"),
+  openExternal: (...args) => invoke("shell:open-external", ...args),
 
   getGitInfo: () => invoke("git:get-info"),
   workspaceSearch: (...args) => invoke("search:workspace", ...args),
@@ -60,7 +65,10 @@ const api: ArchymedesApi = {
   loadSession: (...args) => invoke("session:load", ...args),
   saveSession: (...args) => invoke("session:save", ...args),
   deleteSession: (...args) => invoke("session:delete", ...args),
+  deleteAllSessions: () => invoke("session:delete-all"),
   renameSession: (...args) => invoke("session:rename", ...args),
+  listLegacySessions: () => invoke("session:legacy"),
+  adoptLegacySessions: (...args) => invoke("session:adopt-legacy", ...args),
 
   diffFile: (...args) => invoke("diff:file", ...args),
   revertFile: (...args) => invoke("diff:revert", ...args),

@@ -1,13 +1,17 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { ChatMessage, ToolCallInfo } from "@shared/types";
 import type { AppErrorInfo } from "@shared/app-error";
+import { OPENROUTER_CREDITS_URL, OPENROUTER_PRIVACY_URL } from "@shared/model-catalog";
+import type { ProviderId } from "@shared/providers";
 import type { AgentController } from "../lib/useAgent";
 import { useI18n } from "../i18n/I18nProvider";
 import type { MessageKey } from "../i18n/types";
 import { Icon } from "./Icon";
 import { CopyButton, MarkdownLite } from "./MarkdownLite";
 import { SessionSwitcher } from "./SessionSwitcher";
+import { setPref, usePref } from "../lib/prefs";
+import "../token-meter.css";
 
 interface Props {
   agent: AgentController;
@@ -17,6 +21,16 @@ interface Props {
   onOpenFile: (path: string, line?: number) => void;
   onOpenDiff: (path: string) => void;
   onOpenSettings: () => void;
+  /** A request from the app shell: focus the message box, or open the past-chats list. */
+  request?: ChatRequest | null;
+  /** The configured provider; free mode shows a one-time privacy notice. */
+  provider?: ProviderId | null;
+}
+
+/** `id` changes on every request so asking twice in a row still works. */
+export interface ChatRequest {
+  kind: "focus" | "history";
+  id: number;
 }
 
 const SLASH_COMMANDS: readonly { cmd: string; key: MessageKey }[] = [
@@ -27,6 +41,8 @@ const SLASH_COMMANDS: readonly { cmd: string; key: MessageKey }[] = [
 ];
 
 const SHORTCUTS: readonly [string, MessageKey][] = [
+  ["mod+l", "cmd.goToChat"],
+  ["mod+h", "cmd.chatHistory"],
   ["mod+p", "cmd.quickOpen"],
   ["mod+shift+p", "status.commands"],
   ["mod+shift+f", "cmd.search"],
@@ -34,6 +50,7 @@ const SHORTCUTS: readonly [string, MessageKey][] = [
   ["mod+j", "cmd.toggleTerminal"],
   ["mod+alt+b", "cmd.toggleAgent"],
   ["mod+`", "cmd.focusTerminal"],
+  ["mod+,", "cmd.settings"],
 ];
 
 const SUGGESTIONS: readonly MessageKey[] = ["agent.suggestion1", "agent.suggestion2", "agent.suggestion3", "agent.suggestion4"];
@@ -137,12 +154,17 @@ function ToolCallView({ call, onOpenFile, onOpenDiff }: {
   );
 }
 
-function MessageView({ msg, onOpenFile, onOpenDiff }: {
+/**
+ * Memoized: while a reply streams only that message object changes (useAgent keeps the others'
+ * identity), so finished messages skip re-rendering and re-parsing their markdown.
+ */
+const MessageView = memo(function MessageView({ msg, onOpenFile, onOpenDiff }: {
   msg: ChatMessage;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, formatCompact, formatNumber } = useI18n();
+  const showTokenUsage = usePref("showTokenUsage");
 
   if (msg.role === "user") {
     return (
@@ -184,15 +206,32 @@ function MessageView({ msg, onOpenFile, onOpenDiff }: {
             <CopyButton text={msg.content} label={t("agent.copyMessage")} />
           </div>
         )}
+        {showTokenUsage && !msg.pending && msg.usage && (
+          <div
+            className="msg-tokens"
+            title={t("agent.messageTokensTitle", { input: formatNumber(msg.usage.inputTokens), output: formatNumber(msg.usage.outputTokens) })}
+          >
+            <bdi dir="ltr">
+              {t("agent.messageTokens", { input: formatCompact(msg.usage.inputTokens), output: formatCompact(msg.usage.outputTokens) })}
+            </bdi>
+          </div>
+        )}
       </div>
     </div>
   );
-}
+});
 
 type Suggestion = { kind: "command" | "file"; value: string; detail: string };
 
-export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpenDiff, onOpenSettings }: Props) {
+export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpenDiff, onOpenSettings, request, provider }: Props) {
   const { t, shortcut } = useI18n();
+  // Stable callbacks so memoized messages don't re-render when the parent passes new closures.
+  const openFileRef = useRef(onOpenFile);
+  const openDiffRef = useRef(onOpenDiff);
+  openFileRef.current = onOpenFile;
+  openDiffRef.current = onOpenDiff;
+  const openFileStable = useCallback((path: string) => openFileRef.current(path), []);
+  const openDiffStable = useCallback((path: string) => openDiffRef.current(path), []);
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
   const [history, setHistory] = useState<string[]>([]);
@@ -204,6 +243,15 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const sendKey = usePref("chatSendKey");
+  const privacyDismissed = usePref("freePrivacyNoticeDismissed");
+
+  useEffect(() => {
+    if (!request) return;
+    if (request.kind === "history") setHistoryOpen(true);
+    else inputRef.current?.focus();
+  }, [request]);
   const { busy, session, error } = agent;
 
   useEffect(() => {
@@ -276,6 +324,7 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
     if (cmd === "/sessions") {
       void agent.refreshSessions();
       setNotice("sessions");
+      setHistoryOpen(true);
       return true;
     }
     if (cmd === "/settings") {
@@ -325,7 +374,10 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
       }
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
+    // "enter": Enter sends, Shift+Enter adds a line. "ctrlEnter": Ctrl/Cmd+Enter sends, Enter adds a line.
+    const sends =
+      e.key === "Enter" && !e.shiftKey && (sendKey === "enter" || e.ctrlKey || e.metaKey);
+    if (sends) {
       e.preventDefault();
       submit();
     } else if (e.key === "ArrowUp" && !input.includes("\n") && history.length > 0 && (input === "" || historyIdx >= 0)) {
@@ -359,10 +411,24 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
 
   const errorText = (err: AppErrorInfo): string => {
     switch (err.code) {
+      case "free-data-policy":
+        return t("agent.error.freeDataPolicy");
+      case "free-rate-minute":
+        return t("agent.error.freeRateMinute", { seconds: err.params?.seconds ?? 60 });
+      case "free-daily-limit":
+        return t("agent.error.freeDailyLimit", { time: err.params?.time ?? "00:00" });
+      case "free-bad-key":
+        return t("agent.error.freeBadKey");
+      case "free-credits":
+        return t("agent.error.freeCredits");
+      case "free-model-unavailable":
+        return t("agent.error.freeModelUnavailable");
       case "no-api-key":
         return t("agent.error.noApiKey");
       case "no-workspace":
         return t("agent.error.noWorkspace");
+      case "free-unavailable":
+        return t("agent.error.freeUnavailable");
       case "iteration-limit":
         return t("agent.error.iterationLimit", { count: err.params?.count ?? 0 });
       default:
@@ -384,7 +450,13 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
           onNew={agent.reset}
           onRename={(id, title) => void agent.renameSessionLocal(id, title)}
           onDelete={(id) => void agent.removeSession(id)}
+          onDeleteAll={() => void agent.removeAllSessions()}
           onRefresh={() => void agent.refreshSessions()}
+          open={historyOpen}
+          onOpenChange={(next) => {
+            setHistoryOpen(next);
+            if (!next) requestAnimationFrame(() => inputRef.current?.focus());
+          }}
         />
         <button className="icon-btn" onClick={agent.reset} title={t("sessions.new")} aria-label={t("sessions.new")}>
           <Icon name="plus" size={16} />
@@ -402,6 +474,22 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
       </div>
 
       <div className="agent-messages" ref={scrollRef} onScroll={onScroll}>
+        {provider === "free" && !privacyDismissed && (
+          <div className="callout info free-privacy" role="note">
+            <Icon name="info" size={15} />
+            <div className="callout-body">
+              <div>{t("free.privacyNotice")}</div>
+            </div>
+            <button
+              className="icon-btn"
+              onClick={() => setPref("freePrivacyNoticeDismissed", true)}
+              title={t("free.privacyDismiss")}
+              aria-label={t("free.privacyDismiss")}
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+        )}
         {empty && (
           <div className="agent-empty">
             <div className="agent-empty-mark" aria-hidden>
@@ -414,6 +502,17 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
                 <span>{t("agent.error.noApiKey")}</span>
               </button>
             )}
+            <div className="agent-empty-keys">
+              <button className="link-btn" onClick={() => setHistoryOpen(true)}>
+                <Icon name="history" size={13} />
+                {t("cmd.chatHistory")}
+                <kbd>{shortcut("mod+h")}</kbd>
+              </button>
+              <span className="agent-empty-key">
+                {t("cmd.goToChat")}
+                <kbd>{shortcut("mod+l")}</kbd>
+              </span>
+            </div>
             <div className="suggestions-title">{t("agent.suggestionsTitle")}</div>
             <div className="suggestions">
               {SUGGESTIONS.map((key) => (
@@ -434,7 +533,7 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
         )}
 
         {session.messages.map((msg) => (
-          <MessageView key={msg.id} msg={msg} onOpenFile={onOpenFile} onOpenDiff={onOpenDiff} />
+          <MessageView key={msg.id} msg={msg} onOpenFile={openFileStable} onOpenDiff={openDiffStable} />
         ))}
 
         {notice === "help" && (
@@ -499,7 +598,23 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
             <Icon name="alert" size={15} />
             <div className="callout-body">
               <div dir="auto">{errorText(error)}</div>
-              {error.code === "no-api-key" && (
+              {error.code === "free-data-policy" && (
+                <button className="btn small" onClick={() => void window.archymedes.openExternal(OPENROUTER_PRIVACY_URL)}>
+                  <Icon name="external" size={13} />
+                  {t("agent.error.openPrivacySettings")}
+                </button>
+              )}
+              {error.code === "free-credits" && (
+                <button className="btn small" onClick={() => void window.archymedes.openExternal(OPENROUTER_CREDITS_URL)}>
+                  <Icon name="external" size={13} />
+                  {t("agent.error.openCredits")}
+                </button>
+              )}
+              {(error.code === "no-api-key" ||
+                error.code === "free-unavailable" ||
+                error.code === "free-bad-key" ||
+                error.code === "free-daily-limit" ||
+                error.code === "free-model-unavailable") && (
                 <button className="btn small" onClick={onOpenSettings}>
                   {t("titlebar.settings")}
                 </button>
@@ -566,7 +681,9 @@ export function AgentPanel({ agent, modelLabel, hasKey, files, onOpenFile, onOpe
                 {t("agent.stop")}
               </button>
             )}
-            <button className="btn primary small" onClick={submit} disabled={!input.trim()} title={t("agent.send")}>
+            <button className="btn primary small" onClick={submit} disabled={!input.trim()}
+              title={`${t("agent.send")} (${shortcut(sendKey === "enter" ? "Enter" : "mod+Enter")})`}
+            >
               <Icon name="send" size={13} flipRtl />
               {t("agent.send")}
             </button>

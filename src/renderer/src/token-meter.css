@@ -1,0 +1,17 @@
+/* Token meter: the per-message caption in the chat and the daily figures in the status bar. */
+
+.msg-tokens {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.statusbar .seg.allowance-warn {
+  color: var(--yellow);
+}
+
+.statusbar .seg.allowance-out {
+  color: var(--red);
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionSummary } from "@shared/types";
 import { Icon } from "./Icon";
 import { useI18n } from "../i18n/I18nProvider";
@@ -12,22 +12,62 @@ interface Props {
   onNew: () => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  /** Deletes every chat of the open project; the footer button is hidden without it. */
+  onDeleteAll?: () => void;
   onRefresh: () => void;
+  /** Controlled open state (optional): lets shortcuts and buttons elsewhere open the list. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Sessions saved before localization used this literal as their default title.
 const LEGACY_DEFAULT_TITLE = "New chat";
 
 export function SessionSwitcher({
-  sessions, currentId, currentTitle, dirtyFlag, onSwitch, onNew, onRename, onDelete, onRefresh,
+  sessions, currentId, currentTitle, dirtyFlag, onSwitch, onNew, onRename, onDelete, onDeleteAll, onRefresh, open: openProp, onOpenChange,
 }: Props) {
-  const { t, formatRelativeTime } = useI18n();
-  const [open, setOpen] = useState(false);
+  const { t, shortcut, formatRelativeTime } = useI18n();
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const setOpen = useCallback((next: boolean) => {
+    if (next === openRef.current) return;
+    openRef.current = next;
+    setOpenState(next);
+    onOpenChangeRef.current?.(next);
+  }, []);
   const [filter, setFilter] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  /** Chats from older builds that belong to no project; offered for moving into this one. */
+  const [legacyCount, setLegacyCount] = useState(0);
+  const [adopting, setAdopting] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const refreshLegacy = useCallback(() => {
+    window.archymedes.listLegacySessions().then(
+      (legacy) => setLegacyCount(legacy.count),
+      () => setLegacyCount(0),
+    );
+  }, []);
+
+  const adoptLegacy = async (): Promise<void> => {
+    setAdopting(true);
+    try {
+      await window.archymedes.adoptLegacySessions("all");
+    } catch {
+      // The list below simply stays as it was.
+    } finally {
+      setAdopting(false);
+      refreshLegacy();
+      onRefresh();
+    }
+  };
 
   useEffect(() => {
     if (dirtyFlag > 0) onRefresh();
@@ -37,6 +77,7 @@ export function SessionSwitcher({
   useEffect(() => {
     if (!open) return;
     onRefresh();
+    refreshLegacy();
     setFilter("");
     const onPointer = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
@@ -59,6 +100,12 @@ export function SessionSwitcher({
     return () => clearTimeout(timer);
   }, [confirmDeleteId]);
 
+  useEffect(() => {
+    if (!confirmDeleteAll) return;
+    const timer = setTimeout(() => setConfirmDeleteAll(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmDeleteAll]);
+
   const displayTitle = (title: string) => (title && title !== LEGACY_DEFAULT_TITLE ? title : t("sessions.untitled"));
   const query = filter.trim().toLocaleLowerCase();
   const visible = query
@@ -75,7 +122,7 @@ export function SessionSwitcher({
     <div className="session-switcher" ref={rootRef}>
       <button
         className="session-toggle"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
         title={t("sessions.menu")}
@@ -84,6 +131,15 @@ export function SessionSwitcher({
           {displayTitle(currentTitle)}
         </span>
         <Icon name="chevronDown" size={12} className="chev" />
+      </button>
+      <button
+        className={`icon-btn session-history-btn${open ? " pressed" : ""}`}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        title={`${t("sessions.history")} (${shortcut("mod+h")})`}
+        aria-label={t("sessions.history")}
+      >
+        <Icon name="history" size={15} />
       </button>
 
       {open && (
@@ -107,6 +163,15 @@ export function SessionSwitcher({
               {t("sessions.new")}
             </button>
           </div>
+          {legacyCount > 0 && (
+            <div className="session-legacy" role="note">
+              <Icon name="history" size={13} />
+              <span>{t("sessions.legacyNotice", { count: legacyCount })}</span>
+              <button className="btn small" onClick={() => void adoptLegacy()} disabled={adopting}>
+                {t("sessions.legacyMove")}
+              </button>
+            </div>
+          )}
           <div className="session-list">
             {visible.length === 0 && <div className="empty-note">{t("sessions.empty")}</div>}
             {visible.map((s) => (
@@ -173,6 +238,24 @@ export function SessionSwitcher({
               </div>
             ))}
           </div>
+          {onDeleteAll && sessions.length > 0 && (
+            <div className="session-menu-footer">
+              <button
+                className={`btn small danger-text${confirmDeleteAll ? " confirming" : ""}`}
+                onClick={() => {
+                  if (confirmDeleteAll) {
+                    onDeleteAll();
+                    setConfirmDeleteAll(false);
+                  } else {
+                    setConfirmDeleteAll(true);
+                  }
+                }}
+              >
+                <Icon name="trash" size={13} />
+                {confirmDeleteAll ? t("sessions.deleteAllConfirm") : t("sessions.deleteAll")}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -2,12 +2,14 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "@shared/types";
+import type { ProviderId } from "@shared/providers";
+import { getPrefs, reloadPrefs } from "../lib/prefs";
 import { fakeApi } from "../../test/fake-api";
 import { renderWithProviders } from "../../test/render";
 import { useAgent } from "../lib/useAgent";
 import { AgentPanel } from "./AgentPanel";
 
-function Harness(props: { hasKey?: boolean; onOpenDiff?: (path: string) => void; onOpenSettings?: () => void }) {
+function Harness(props: { hasKey?: boolean; onOpenDiff?: (path: string) => void; onOpenSettings?: () => void; provider?: ProviderId }) {
   const agent = useAgent();
   return (
     <AgentPanel
@@ -18,6 +20,7 @@ function Harness(props: { hasKey?: boolean; onOpenDiff?: (path: string) => void;
       onOpenFile={vi.fn()}
       onOpenDiff={props.onOpenDiff ?? vi.fn()}
       onOpenSettings={props.onOpenSettings ?? vi.fn()}
+      provider={props.provider ?? "anthropic"}
     />
   );
 }
@@ -130,5 +133,57 @@ describe("AgentPanel", () => {
 
     expect(fakeApi().approveCommand).toHaveBeenCalledWith("approval-1", "deny");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
+
+  it("shows the tokens each reply used under it", () => {
+    renderWithProviders(<Harness />);
+
+    emit(
+      { type: "message-start", id: "m1" },
+      { type: "text-delta", id: "m1", delta: "Here you go" },
+      { type: "message-end", id: "m1", usage: { inputTokens: 1_200, outputTokens: 340 } },
+      { type: "status", status: "idle" },
+    );
+
+    expect(screen.getByText("↑1.2K ↓340 tokens")).toBeInTheDocument();
+  });
+  describe("free mode", () => {
+    it("shows a one-time privacy notice until it is dismissed", async () => {
+      reloadPrefs();
+      const user = userEvent.setup();
+      const { unmount } = renderWithProviders(<Harness provider="free" />);
+      const notice = "Free models may log your prompts and code. Don't share secrets; use a paid provider for private code.";
+      expect(screen.getByText(notice)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
+      expect(getPrefs().freePrivacyNoticeDismissed).toBe(true);
+      unmount();
+      renderWithProviders(<Harness provider="free" />);
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
+    });
+
+    it("never shows the notice for other providers", () => {
+      reloadPrefs();
+      renderWithProviders(<Harness provider="anthropic" />);
+      expect(screen.queryByText(/Free models may log/)).not.toBeInTheDocument();
+    });
+
+    it("explains a data-policy refusal and opens OpenRouter's privacy settings", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<Harness provider="free" />);
+      emit({ type: "error", message: "No endpoints found matching your data policy", code: "free-data-policy" });
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Free models need the free-endpoint options enabled at openrouter.ai/settings/privacy.");
+      await user.click(screen.getByRole("button", { name: "Open privacy settings" }));
+      expect(fakeApi().openExternal).toHaveBeenCalledWith("https://openrouter.ai/settings/privacy");
+    });
+
+    it("tells a per-minute limit from a used-up day", async () => {
+      renderWithProviders(<Harness provider="free" />);
+      emit({ type: "error", message: "x", code: "free-rate-minute", params: { seconds: 42 } });
+      expect(await screen.findByRole("alert")).toHaveTextContent("Wait about 42 seconds, then send again.");
+      emit({ type: "error", message: "x", code: "free-daily-limit", params: { time: "00:00" } });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Today's free allowance is used up. It resets at 00:00 UTC."));
+    });
   });
 });

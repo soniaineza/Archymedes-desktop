@@ -29,3 +29,14 @@ export async function supportsSymlinks(): Promise<boolean> {
   }
   return canSymlink;
 }
+
+/**
+ * Links a directory, on every platform and without privileges.
+ *
+ * Windows needs Developer Mode for a symlink but not for a junction — so a junction is the link an
+ * attacker there can actually plant, and the boundary tests that link a *directory* use one rather
+ * than skip. Only the tests that link a single file still need {@link supportsSymlinks}.
+ */
+export async function linkDirectory(target: string, link: string): Promise<void> {
+  await fs.symlink(target, link, process.platform === "win32" ? "junction" : "dir");
+}

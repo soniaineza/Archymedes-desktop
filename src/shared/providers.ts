@@ -3,9 +3,12 @@
  * Pure data and pure functions only: no Node, Electron or DOM APIs.
  */
 
+/** Same order as the CLI's `provider-specs.ts` PROVIDER_IDS (frontier labs, aggregators, local/generic, free). */
 export const PROVIDER_IDS = [
   "anthropic",
   "openai",
+  "archymedes-cloud",
+  "openrouter",
   "google",
   "xai",
   "deepseek",
@@ -27,6 +30,8 @@ export interface ProviderInfo {
   /** Environment variables that configure this provider when run from a shell. */
   envVars: readonly string[];
   requiresApiKey: boolean;
+  /** True when Base URL must be filled in before a request can be sent (no default endpoint). */
+  requiresBaseUrl?: boolean;
 }
 
 export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
@@ -42,6 +47,27 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     label: "OpenAI",
     defaultModel: "gpt-5.6-terra",
     envVars: ["OPENAI_API_KEY"],
+    requiresApiKey: true,
+  },
+  // The hosted execution exchange: API key = ARCHYMEDES_CLOUD_TOKEN, Base URL = ARCHYMEDES_CLOUD_BASE_URL.
+  // `auto` is intentional: the exchange, not this client, selects the concrete model.
+  // See src/main/agent/cloud-adapter.ts.
+  "archymedes-cloud": {
+    id: "archymedes-cloud",
+    label: "Archymedes Cloud",
+    defaultModel: "auto",
+    envVars: ["ARCHYMEDES_CLOUD_TOKEN", "ARCHYMEDES_CLOUD_BASE_URL"],
+    requiresApiKey: true,
+    requiresBaseUrl: true,
+  },
+  // OpenRouter with the user's own key and no zero-price cap: any `publisher/model` id, paid or
+  // `:free`, and `openrouter/auto` (the gateway picks the model). Unlike `free`, nothing is capped.
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    defaultModel: "openrouter/auto",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    envVars: ["OPENROUTER_API_KEY"],
     requiresApiKey: true,
   },
   google: {
