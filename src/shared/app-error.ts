@@ -6,7 +6,24 @@
  * the message. This module owns both ends of that encoding.
  */
 
-export type AppErrorCode = "no-api-key" | "no-workspace" | "invalid-argument" | "iteration-limit";
+export type AppErrorCode =
+  | "no-api-key"
+  | "no-workspace"
+  | "invalid-argument"
+  | "iteration-limit"
+  | "free-unavailable"
+  /** OpenRouter has no endpoint for the free model that the account's privacy settings allow. */
+  | "free-data-policy"
+  /** A short burst limit; params.seconds says how long to wait when known. */
+  | "free-rate-minute"
+  /** Today's free allowance (requests or tokens) is used up; params.time is the UTC reset time when known. */
+  | "free-daily-limit"
+  /** OpenRouter rejected the key (401). */
+  | "free-bad-key"
+  /** 402: credits or the key's budget are exhausted, or the balance is negative. */
+  | "free-credits"
+  /** The chosen free model is unavailable (404/403/503). */
+  | "free-model-unavailable";
 
 export type AppErrorParams = Record<string, string | number>;
 
@@ -29,7 +46,19 @@ export class AppError extends Error {
 }
 
 const TAG = "ARCHYMEDES_APP_ERROR:";
-const CODES: ReadonlySet<string> = new Set<AppErrorCode>(["no-api-key", "no-workspace", "invalid-argument", "iteration-limit"]);
+const CODES: ReadonlySet<string> = new Set<AppErrorCode>([
+  "no-api-key",
+  "no-workspace",
+  "invalid-argument",
+  "iteration-limit",
+  "free-unavailable",
+  "free-data-policy",
+  "free-rate-minute",
+  "free-daily-limit",
+  "free-bad-key",
+  "free-credits",
+  "free-model-unavailable",
+]);
 
 /** An Error safe to throw across IPC: AppErrors keep their code, others keep their message. */
 export function toTransportError(error: unknown): Error {

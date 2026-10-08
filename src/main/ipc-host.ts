@@ -28,6 +28,8 @@ export type EmitEvent = <K extends EventChannel>(channel: K, ...payload: IpcEven
 export interface HostBridge {
   /** Resolves to the chosen directory, or null when the user cancels. */
   pickDirectory(title: string): Promise<string | null>;
+  /** Opens an already-validated https:// URL in the user's browser. */
+  openExternal(url: string): Promise<void>;
   emit: EmitEvent;
 }
 

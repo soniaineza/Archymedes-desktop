@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileNode, ProviderSettings } from "@shared/types";
 import { formatModelLabel, PROVIDER_INFO } from "@shared/providers";
 import { AgentPanel } from "./components/AgentPanel";
+import type { ChatRequest } from "./components/AgentPanel";
 import { CodeEditor } from "./components/CodeEditor";
 import { CommandPalette } from "./components/CommandPalette";
 import type { Command } from "./components/CommandPalette";
@@ -12,7 +13,8 @@ import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
-import { StatusBar, useGitStatus } from "./components/StatusBar";
+import { StatusBar } from "./components/StatusBar";
+import { useGitStatus } from "./lib/useGitStatus";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { useToast } from "./components/Toasts";
 import { Welcome } from "./components/Welcome";
@@ -21,6 +23,8 @@ import { LOCALES } from "./i18n/locales";
 import { flattenFiles } from "./lib/files";
 import { pushRecent } from "./lib/recent";
 import type { OpenTab } from "./lib/tabs";
+import { isDirty } from "./lib/tabs";
+import { applyPrefsToDocument, getPrefs, setPref, usePrefs } from "./lib/prefs";
 import { applyTheme, cycleTheme, getTheme, themeIcon, THEMES, watchSystemTheme } from "./lib/theme";
 import type { Theme } from "./lib/theme";
 import { useAgent } from "./lib/useAgent";
@@ -64,11 +68,16 @@ export default function App() {
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [hasKey, setHasKey] = useState(true);
   const [modelLabel, setModelLabel] = useState("");
+  const [provider, setProvider] = useState<ProviderSettings["provider"] | null>(null);
+  /** Free mode without a key or a gateway cannot run yet; the welcome screen then shows its setup. */
+  const [freeNeedsSetup, setFreeNeedsSetup] = useState(false);
   const [editTick, setEditTick] = useState(0);
   const [theme, setTheme] = useState<Theme>(getTheme);
   const [scale, setScale] = useState(() => readStored("archymedes.scale", parseScale, 1));
   const [sidebarOpen, setSidebarOpen] = useState(() => readStored("archymedes.sidebar-open", parseBool, true));
   const [agentOpen, setAgentOpen] = useState(() => readStored("archymedes.agent-open", parseBool, true));
+  const [chatRequest, setChatRequest] = useState<ChatRequest | null>(null);
+  const prefs = usePrefs();
   const [terminalCollapsed, setTerminalCollapsed] = useState(() =>
     readStored("archymedes.terminal-collapsed", parseBool, false),
   );
@@ -90,6 +99,7 @@ export default function App() {
   tabsRef.current = tabs;
 
   useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => applyPrefsToDocument(prefs), [prefs]);
   useEffect(() => watchSystemTheme(), []);
 
   useEffect(() => {
@@ -104,6 +114,14 @@ export default function App() {
   const applySettingsSummary = useCallback((s: ProviderSettings) => {
     setHasKey(Boolean(s.apiKey) || PROVIDER_INFO[s.provider]?.requiresApiKey === false);
     setModelLabel(formatModelLabel(s));
+    setProvider(s.provider);
+    if (s.provider !== "free") setFreeNeedsSetup(false);
+    else {
+      window.archymedes.isFreeReady().then(
+        (ready) => setFreeNeedsSetup(!ready),
+        () => setFreeNeedsSetup(false),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -162,6 +180,8 @@ export default function App() {
     setTabs([]);
     setActiveTab(null);
     agent.reset();
+    // Chats are per project: the list has to be re-read for the folder just opened.
+    void agent.refreshSessions();
   };
 
   const pickWorkspace = async () => {
@@ -202,22 +222,70 @@ export default function App() {
   };
 
   const closeTab = (path: string) => {
+    const closing = tabs.find((tab) => tab.path === path);
+    if (
+      closing &&
+      isDirty(closing) &&
+      getPrefs().confirmCloseDirty &&
+      !window.confirm(t("editor.confirmClose", { name: path.split("/").pop() ?? path }))
+    ) {
+      return;
+    }
     const idx = tabs.findIndex((tab) => tab.path === path);
     const next = tabs.filter((tab) => tab.path !== path);
     setTabs(next);
     if (activeTab === path) setActiveTab(next.length ? next[Math.max(0, idx - 1)].path : null);
   };
 
-  const saveTab = async (path: string, content: string) => {
+  const savingRef = useRef(new Set<string>());
+  const saveTab = async (path: string, content: string, options: { quiet?: boolean } = {}) => {
+    if (savingRef.current.has(path)) return;
+    savingRef.current.add(path);
     try {
       await window.archymedes.writeFile(path, content);
-      setTabs((ts) => ts.map((tab) => (tab.path === path ? { ...tab, content, original: content } : tab)));
-      notify(t("editor.saved", { name: path.split("/").pop() ?? path }), "success");
+      // Only the saved text becomes the baseline: anything typed during the write stays dirty.
+      setTabs((ts) => ts.map((tab) => (tab.path === path ? { ...tab, original: content } : tab)));
+      if (!options.quiet) notify(t("editor.saved", { name: path.split("/").pop() ?? path }), "success");
       void refreshTree();
     } catch (err) {
       notify(t("editor.saveFailed", { path, error: err instanceof Error ? err.message : String(err) }), "error");
+    } finally {
+      savingRef.current.delete(path);
     }
   };
+
+  /** Auto save never touches read-only (truncated) tabs, which could not be written in full. */
+  const autoSave = (paths?: readonly string[]) => {
+    for (const tab of tabsRef.current) {
+      if (tab.truncated || !isDirty(tab)) continue;
+      if (paths && !paths.includes(tab.path)) continue;
+      void saveTab(tab.path, tab.content, { quiet: true });
+    }
+  };
+  const autoSaveRef = useRef(autoSave);
+  autoSaveRef.current = autoSave;
+
+  // Auto save "after delay": every edit restarts the timer.
+  useEffect(() => {
+    if (prefs.autoSave !== "afterDelay" || !tabs.some((tab) => !tab.truncated && isDirty(tab))) return;
+    const timer = setTimeout(() => autoSaveRef.current(), prefs.autoSaveDelay);
+    return () => clearTimeout(timer);
+  }, [tabs, prefs.autoSave, prefs.autoSaveDelay]);
+
+  // Auto save "when focus changes": switching tabs or leaving the window saves.
+  const previousTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousTabRef.current;
+    previousTabRef.current = activeTab;
+    if (getPrefs().autoSave === "onFocusChange" && previous && previous !== activeTab) autoSaveRef.current([previous]);
+  }, [activeTab]);
+  useEffect(() => {
+    const onBlur = () => {
+      if (getPrefs().autoSave !== "off") autoSaveRef.current();
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
 
   const toggleSidebar = () => setSidebarOpen((open) => !open);
   const toggleAgent = () => setAgentOpen((open) => !open);
@@ -227,6 +295,55 @@ export default function App() {
     requestAnimationFrame(() => document.dispatchEvent(new CustomEvent("focus-terminal")));
   };
 
+  /** Show the chat pane (if hidden) and focus its message box, or open the past-chats list. */
+  const requestChat = useCallback((kind: ChatRequest["kind"]) => {
+    setAgentOpen(true);
+    setChatRequest({ kind, id: Date.now() + Math.random() });
+  }, []);
+  // A hidden pane forgets the last request, so reopening it later doesn't replay it.
+  useEffect(() => {
+    if (!agentOpen) setChatRequest(null);
+  }, [agentOpen]);
+  const goToChat = () => requestChat("focus");
+  const openChatHistory = () => {
+    void agent.refreshSessions();
+    requestChat("history");
+  };
+
+  // After Settings, the command palette or the diff viewer closes, go back to the chat box
+  // when the chat is open and nothing else took focus.
+  const agentOpenRef = useRef(agentOpen);
+  agentOpenRef.current = agentOpen;
+  const returnsToChat = overlay === "settings" || overlay === "palette" || diffPath !== null;
+  const returnsToChatRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = returnsToChatRef.current;
+    returnsToChatRef.current = returnsToChat;
+    if (!wasOpen || returnsToChat || overlay !== null || !agentOpenRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const el = document.activeElement;
+      const busyElsewhere =
+        el instanceof HTMLElement && (el.matches("input, textarea, select, [contenteditable='true']") || el.closest(".xterm"));
+      if (!busyElsewhere) requestChat("focus");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [returnsToChat, overlay, requestChat]);
+
+  // Restore the most recent chat on startup.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!workspace || restoredRef.current) return;
+    restoredRef.current = true;
+    void window.archymedes
+      .listSessions()
+      .then((list) => {
+        if (!getPrefs().restoreLastChat || list.length === 0) return;
+        void agent.switchTo(list[0].id);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
+
   const files = useMemo(() => flattenFiles(tree), [tree]);
 
   const commands: Command[] = [
@@ -234,7 +351,31 @@ export default function App() {
     { id: "open-workspace", title: t("cmd.openWorkspace"), icon: "folder", run: () => void pickWorkspace() },
     { id: "search", title: t("cmd.search"), icon: "search", shortcut: "mod+shift+f", run: () => setOverlay("search") },
     { id: "settings", title: t("cmd.settings"), icon: "settings", shortcut: "mod+,", run: () => setOverlay("settings") },
-    { id: "new-chat", title: t("cmd.newChat"), icon: "plus", run: () => agent.reset() },
+    { id: "go-to-chat", title: t("cmd.goToChat"), icon: "message", shortcut: "mod+l", run: goToChat },
+    { id: "chat-history", title: t("cmd.chatHistory"), icon: "history", shortcut: "mod+h", run: openChatHistory },
+    { id: "delete-chat", title: t("cmd.deleteChat"), icon: "trash", run: () => void agent.removeSession(agent.session.id) },
+    {
+      id: "new-chat",
+      title: t("cmd.newChat"),
+      icon: "plus",
+      run: () => {
+        agent.reset();
+        goToChat();
+      },
+    },
+    {
+      id: "toggle-word-wrap",
+      title: t("cmd.toggleWordWrap"),
+      icon: "code",
+      shortcut: "alt+z",
+      run: () => setPref("editorWordWrap", !getPrefs().editorWordWrap),
+    },
+    {
+      id: "toggle-auto-save",
+      title: getPrefs().autoSave === "off" ? t("cmd.autoSaveOn") : t("cmd.autoSaveOff"),
+      icon: "check",
+      run: () => setPref("autoSave", getPrefs().autoSave === "off" ? "afterDelay" : "off"),
+    },
     { id: "toggle-sidebar", title: t("cmd.toggleSidebar"), icon: "panelStart", shortcut: "mod+b", run: toggleSidebar },
     { id: "toggle-terminal", title: t("cmd.toggleTerminal"), icon: "panelBottom", shortcut: "mod+j", run: toggleTerminal },
     { id: "toggle-agent", title: t("cmd.toggleAgent"), icon: "panelEnd", shortcut: "mod+alt+b", run: toggleAgent },
@@ -253,11 +394,22 @@ export default function App() {
     })),
   ];
 
+  const chatShortcutRef = useRef<(kind: ChatRequest["kind"]) => void>(() => {});
+  chatShortcutRef.current = (kind) => (kind === "focus" ? goToChat() : openChatHistory());
+
   // Physical key codes keep shortcuts working on non-Latin keyboard layouts (Arabic, Russian, Hindi…).
   useEffect(() => {
     if (!workspace) return;
     const onKey = (e: KeyboardEvent) => {
+      // Alt+Z toggles word wrap, as in VS Code.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === "KeyZ") {
+        e.preventDefault();
+        setPref("editorWordWrap", !getPrefs().editorWordWrap);
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
+      // Ctrl+L / Ctrl+H mean "clear screen" / "backspace" to a shell: leave them to the terminal.
+      const inTerminal = e.target instanceof Element && e.target.closest(".terminal-panel, .xterm") !== null;
       // Digit1…9 use physical codes so numpad and layouts both work.
       const digitIndex = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9"].indexOf(e.code);
       if (digitIndex !== -1) {
@@ -275,6 +427,8 @@ export default function App() {
           requestAnimationFrame(() => document.dispatchEvent(new CustomEvent("focus-terminal")));
         },
         Comma: () => setOverlay("settings"),
+        KeyL: !e.shiftKey && !e.altKey && !inTerminal ? () => chatShortcutRef.current("focus") : undefined,
+        KeyH: !e.shiftKey && !e.altKey && !inTerminal ? () => chatShortcutRef.current("history") : undefined,
       };
       const handler = handlers[e.code];
       if (!handler) return;
@@ -292,6 +446,9 @@ export default function App() {
         onPick={() => void pickWorkspace()}
         onOpenPath={(p) => void openPath(p)}
         onCycleTheme={() => setTheme(cycleTheme(theme))}
+        needsKey={!hasKey}
+        freeSetup={freeNeedsSetup}
+        onSettingsSaved={applySettingsSummary}
       />
     );
   }
@@ -312,7 +469,7 @@ export default function App() {
           <Icon name="chevronDown" size={11} />
         </button>
         <span className="spacer" />
-        {!hasKey && (
+        {(!hasKey || freeNeedsSetup) && (
           <button className="btn warn small" onClick={() => setOverlay("settings")}>
             <Icon name="alert" size={13} />
             {t("titlebar.noApiKey")}
@@ -378,6 +535,14 @@ export default function App() {
                 onOpenSearch={() => setOverlay("search")}
                 onOpenDiff={setDiffPath}
                 onReverted={(p) => reloadCleanTab(p, true)}
+                chats={agent.sessions}
+                currentChatId={agent.session.id}
+                onOpenChat={(id) => {
+                  void agent.switchTo(id);
+                  goToChat();
+                }}
+                onShowAllChats={openChatHistory}
+                onDeleteChat={(id) => void agent.removeSession(id)}
               />
             </div>
             <div className="resize-handle vertical" {...sidebar.handleProps} aria-label={t("sidebar.explorer")} />
@@ -396,6 +561,9 @@ export default function App() {
             onClose={closeTab}
             onSave={(p, c) => void saveTab(p, c)}
             onChange={(p, c) => setTabs((ts) => ts.map((tab) => (tab.path === p ? { ...tab, content: c } : tab)))}
+            onBlur={(p) => {
+              if (getPrefs().autoSave === "onFocusChange") autoSave([p]);
+            }}
           />
           {!terminalCollapsed && (
             <div className="resize-handle horizontal" {...terminal.handleProps} aria-label={t("terminal.title")} />
@@ -417,10 +585,12 @@ export default function App() {
                 agent={agent}
                 modelLabel={modelLabel}
                 hasKey={hasKey}
+                provider={provider}
                 files={files}
                 onOpenFile={(p) => void openFile(p)}
                 onOpenDiff={setDiffPath}
                 onOpenSettings={() => setOverlay("settings")}
+                request={chatRequest}
               />
             </div>
           </>

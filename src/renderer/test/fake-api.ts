@@ -28,10 +28,15 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
 
     getSettings: vi.fn(async () => ({ ...DEFAULT_PROVIDER_SETTINGS })),
     saveSettings: vi.fn(async () => {}),
+    listModels: vi.fn(async (request) => ({ provider: request.provider, known: [], live: [], status: "unsupported" as const })),
 
     sendAgentMessage: vi.fn(async () => {}),
     cancelAgent: vi.fn(async () => {}),
     approveCommand: vi.fn(async () => {}),
+    getDailyUsage: vi.fn(async () => ({ date: "2026-10-08", tokens: 0, provider: DEFAULT_PROVIDER_SETTINGS.provider })),
+    checkFreeKey: vi.fn(async () => ({ ok: true as const, info: { isFreeTier: true, dailyRequestLimit: 50 } })),
+    isFreeReady: vi.fn(async () => true),
+    openExternal: vi.fn(async () => {}),
     onAgentEvent: (handler) => {
       agentListeners.add(handler);
       return () => {
@@ -47,7 +52,10 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
     loadSession: vi.fn(async () => null),
     saveSession: vi.fn(async () => {}),
     deleteSession: vi.fn(async () => {}),
+    deleteAllSessions: vi.fn(async () => 0),
     renameSession: vi.fn(async () => {}),
+    listLegacySessions: vi.fn(async () => ({ count: 0, ids: [] })),
+    adoptLegacySessions: vi.fn(async () => 0),
 
     diffFile: vi.fn(async () => null),
     revertFile: vi.fn(async () => {}),

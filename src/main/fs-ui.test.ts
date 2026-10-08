@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { supportsSymlinks } from "../test-support/symlinks";
+import { linkDirectory, supportsSymlinks } from "../test-support/symlinks";
 import { listDirTree, readFileForEditor, writeFileFromEditor } from "./fs-ui";
 
 let root: string;
@@ -31,24 +31,21 @@ describe("editor file access stays inside the workspace", () => {
     await expect(readFileForEditor(root, "link.txt")).rejects.toThrow();
   });
 
-  it("refuses to write through a symlinked directory that escapes the workspace", async (ctx) => {
-    if (!(await supportsSymlinks())) return ctx.skip();
-    await fs.symlink(outside, path.join(root, "out-link"));
+  it("refuses to write through a symlinked directory that escapes the workspace", async () => {
+    await linkDirectory(outside, path.join(root, "out-link"));
     await expect(writeFileFromEditor(root, "out-link/evil.txt", "pwned")).rejects.toThrow();
     await expect(fs.readFile(path.join(outside, "evil.txt"), "utf8")).rejects.toThrow();
   });
 
-  it("refuses to create directories outside through a symlinked parent", async (ctx) => {
-    if (!(await supportsSymlinks())) return ctx.skip();
-    await fs.symlink(outside, path.join(root, "out-link"));
+  it("refuses to create directories outside through a symlinked parent", async () => {
+    await linkDirectory(outside, path.join(root, "out-link"));
     await expect(writeFileFromEditor(root, "out-link/a/b/evil.txt", "pwned")).rejects.toThrow();
     await expect(fs.stat(path.join(outside, "a"))).rejects.toThrow();
   });
 
-  it("works when the workspace root itself is opened through a symlink", async (ctx) => {
-    if (!(await supportsSymlinks())) return ctx.skip();
+  it("works when the workspace root itself is opened through a symlink", async () => {
     const linkedRoot = path.join(outside, "linked-root");
-    await fs.symlink(root, linkedRoot);
+    await linkDirectory(root, linkedRoot);
     await fs.writeFile(path.join(root, "a.txt"), "hi");
     expect((await readFileForEditor(linkedRoot, "a.txt")).content).toBe("hi");
     await writeFileFromEditor(linkedRoot, "sub/new.txt", "new");
@@ -56,10 +53,9 @@ describe("editor file access stays inside the workspace", () => {
     expect((await listDirTree(linkedRoot)).length).toBeGreaterThan(0);
   });
 
-  it("refuses to list a symlinked directory that escapes the workspace", async (ctx) => {
-    if (!(await supportsSymlinks())) return ctx.skip();
+  it("refuses to list a symlinked directory that escapes the workspace", async () => {
     await fs.writeFile(path.join(outside, "secret.txt"), "top secret");
-    await fs.symlink(outside, path.join(root, "out-link"));
+    await linkDirectory(outside, path.join(root, "out-link"));
     await expect(listDirTree(root, "out-link")).rejects.toThrow();
   });
 });

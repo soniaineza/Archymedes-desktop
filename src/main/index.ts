@@ -67,6 +67,10 @@ function electronBridge(): HostBridge {
       const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+    async openExternal(url) {
+      // The IPC guard already allows only https URLs; checked again at the edge.
+      if (/^https:\/\//i.test(url)) await shell.openExternal(url);
+    },
     emit(channel, ...payload) {
       for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...payload);
     },

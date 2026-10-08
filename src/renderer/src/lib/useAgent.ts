@@ -36,6 +36,11 @@ function withoutQueued(messages: ChatMessage[]): ChatMessage[] {
 
 const isBusy = (status: AgentStatus): boolean => status !== "idle" && status !== "error";
 
+/** Trailing delay that coalesces session saves; run ends and unload save at once. */
+export const SAVE_DEBOUNCE_MS = 500;
+/** Fallback flush interval for streamed text when animation frames are unavailable or paused. */
+const DELTA_FLUSH_MS = 50;
+
 /** A shell command the agent is waiting to run until the user decides. */
 export interface PendingApproval {
   requestId: string;
@@ -66,12 +71,90 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
     setSessions(await window.archymedes.listSessions());
   }, []);
 
-  const persist = useCallback(async (data: SessionData) => {
+  // ---- Debounced persistence: the latest snapshot wins; a different session flushes first.
+  const pendingSaveRef = useRef<SessionData | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushSave = useCallback(async () => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const data = pendingSaveRef.current;
+    if (!data) return;
+    pendingSaveRef.current = null;
     await window.archymedes.saveSession({ ...data, messages: withoutQueued(data.messages) });
     setDirtyFlag((n) => n + 1);
   }, []);
 
+  const persist = useCallback(
+    async (data: SessionData, options: { immediate?: boolean } = {}) => {
+      const pending = pendingSaveRef.current;
+      if (pending && pending.id !== data.id) await flushSave();
+      pendingSaveRef.current = data;
+      if (options.immediate) return flushSave();
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => void flushSave().catch(() => {}), SAVE_DEBOUNCE_MS);
+    },
+    [flushSave],
+  );
+
+  useEffect(() => {
+    const onUnload = (): void => void flushSave().catch(() => {});
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      onUnload();
+    };
+  }, [flushSave]);
+
+  // ---- Streamed text is buffered and applied once per frame, not once per token.
+  const pendingDeltasRef = useRef(new Map<string, string>());
+  const deltaFrameRef = useRef<{ cancel: () => void } | null>(null);
+
+  const flushDeltas = useCallback(() => {
+    deltaFrameRef.current?.cancel();
+    deltaFrameRef.current = null;
+    const pending = pendingDeltasRef.current;
+    if (pending.size === 0) return;
+    const batch = new Map(pending);
+    pending.clear();
+    setSession((s) => ({
+      ...s,
+      messages: s.messages.map((m) => {
+        const delta = batch.get(m.id);
+        return delta ? { ...m, content: m.content + delta } : m;
+      }),
+    }));
+  }, []);
+
+  const scheduleDeltaFlush = useCallback(() => {
+    if (deltaFrameRef.current) return;
+    const run = (): void => {
+      deltaFrameRef.current = null;
+      flushDeltas();
+    };
+    // Animation frames pause in a hidden window; a timer keeps text arriving there too.
+    if (typeof requestAnimationFrame === "function" && document.visibilityState === "visible") {
+      const frame = requestAnimationFrame(run);
+      deltaFrameRef.current = { cancel: () => cancelAnimationFrame(frame) };
+    } else {
+      const timer = setTimeout(run, DELTA_FLUSH_MS);
+      deltaFrameRef.current = { cancel: () => clearTimeout(timer) };
+    }
+  }, [flushDeltas]);
+
+  useEffect(() => () => deltaFrameRef.current?.cancel(), []);
+
   const handleEvent = useCallback((event: AgentEvent) => {
+    if (event.type === "text-delta") {
+      const pending = pendingDeltasRef.current;
+      pending.set(event.id, (pending.get(event.id) ?? "") + event.delta);
+      scheduleDeltaFlush();
+      return;
+    }
+    // Every other event lands after the text streamed before it, so nothing is lost or reordered.
+    flushDeltas();
     switch (event.type) {
       case "status":
         setStatus(event.status);
@@ -82,12 +165,6 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
           messages: [...s.messages, { id: event.id, role: "assistant", content: "", pending: true, toolCalls: [] }],
         }));
         dirtyRef.current = true;
-        break;
-      case "text-delta":
-        setSession((s) => ({
-          ...s,
-          messages: s.messages.map((m) => (m.id === event.id ? { ...m, content: m.content + event.delta } : m)),
-        }));
         break;
       case "tool-start":
         setSession((s) => ({
@@ -120,7 +197,10 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       case "message-end":
         setSession((s) => ({
           ...s,
-          messages: s.messages.map((m) => (m.id === event.id ? { ...m, pending: false } : m)),
+          // The turn's token usage rides on message-end and is shown under the message.
+          messages: s.messages.map((m) =>
+            m.id === event.id ? { ...m, pending: false, ...(event.usage ? { usage: event.usage } : {}) } : m,
+          ),
         }));
         break;
       case "cost":
@@ -142,7 +222,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
         setApprovals([]);
         break;
     }
-  }, []);
+  }, [flushDeltas, scheduleDeltaFlush]);
 
   useEffect(() => window.archymedes.onAgentEvent(handleEvent), [handleEvent]);
 
@@ -151,6 +231,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
   // Autosave and queue-drain run once per busy → settled transition, in an
   // effect so a render that React repeats or discards can't fire them twice.
   const lastStatusRef = useRef<AgentStatus>("idle");
+  const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const wasBusy = isBusy(lastStatusRef.current);
     lastStatusRef.current = status;
@@ -158,7 +239,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
 
     if (dirtyRef.current) {
       dirtyRef.current = false;
-      void persist({ ...sessionRef.current, updatedAt: Date.now() });
+      void persist({ ...sessionRef.current, updatedAt: Date.now() }, { immediate: true }).catch(() => {});
     }
     if (status !== "idle") return;
 
@@ -172,8 +253,13 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       const idx = s.messages.findIndex((m) => m.queued && m.content === next);
       return idx === -1 ? s : { ...s, messages: s.messages.filter((_, i) => i !== idx) };
     });
-    setTimeout(() => sendRef.current?.(next), 50);
+    drainTimerRef.current = setTimeout(() => sendRef.current?.(next), 50);
   }, [status, persist]);
+
+  // An unmounted hook must not send the next queued message later.
+  useEffect(() => () => {
+    if (drainTimerRef.current !== null) clearTimeout(drainTimerRef.current);
+  }, []);
 
   const send = useCallback(
     (text: string) => {
@@ -199,8 +285,8 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
       };
       sessionRef.current = next;
       setSession(next);
-      // Crash safety: the user's words (and the auto-title) hit disk now,
-      // not only after the run finishes. The run-end autosave adds the reply.
+      // Crash safety: the user's words (and the auto-title) hit disk shortly (debounced, and
+      // flushed on unload), not only after the run finishes. The run-end autosave adds the reply.
       void persist(next).catch(() => {});
       void window.archymedes.sendAgentMessage(withoutQueued(next.messages)).catch((err: unknown) => {
         setError(parseAppError(err));
@@ -249,6 +335,13 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
     [refreshSessions, reset],
   );
 
+  /** Deletes every chat of the open project and starts a fresh one. Other projects' chats are untouched. */
+  const removeAllSessions = useCallback(async () => {
+    await window.archymedes.deleteAllSessions();
+    reset();
+    void refreshSessions();
+  }, [refreshSessions, reset]);
+
   const renameSessionLocal = useCallback(
     async (id: string, title: string) => {
       await window.archymedes.renameSession(id, title);
@@ -274,6 +367,7 @@ export function useAgent(options: { onRunFinished?: () => void } = {}) {
     reset,
     switchTo,
     removeSession,
+    removeAllSessions,
     renameSessionLocal,
     refreshSessions,
   };

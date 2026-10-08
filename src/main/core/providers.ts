@@ -41,9 +41,13 @@ export function resolveProvider(
   return statuses.find((s) => s.configured)?.info.id;
 }
 
-/** Which wire protocol a provider speaks. Everything but Anthropic is OpenAI-compatible. */
-export function wireProtocol(id: ProviderId): "anthropic" | "openai-compatible" {
-  return id === "anthropic" ? "anthropic" : "openai-compatible";
+/**
+ * Which wire protocol a provider speaks. Anthropic has its own; Archymedes Cloud speaks Chat
+ * Completions but buffered, with the exchange's spend cap and idempotency key (cloud-adapter.ts);
+ * everything else, OpenRouter included, is OpenAI-compatible.
+ */
+export function wireProtocol(id: ProviderId): "anthropic" | "archymedes-cloud" | "openai-compatible" {
+  return id === "anthropic" ? "anthropic" : id === "archymedes-cloud" ? "archymedes-cloud" : "openai-compatible";
 }
 
 export function catalogPrices(provider: ProviderId, model: string, asOf?: string): TokenPrices | undefined {

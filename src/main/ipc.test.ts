@@ -63,8 +63,10 @@ function harness() {
 
   const emitted: { channel: string; payload: unknown[] }[] = [];
   let nextPick: string | null = null;
+  const opened: string[] = [];
   const bridge: HostBridge = {
     pickDirectory: async () => nextPick,
+    openExternal: async (url) => void opened.push(url),
     emit: (channel, ...payload) => void emitted.push({ channel, payload }),
   };
 
@@ -85,7 +87,12 @@ function harness() {
     runs.push(run);
     return run;
   });
-  const services = createServices({ userData }, { agent, watcher, terminals });
+  const keyInfo = {
+    get: vi.fn(async (_key: string) => ({ isFreeTier: true, dailyRequestLimit: 50, dailyRequestsRemaining: 48 })),
+    noteRequest: vi.fn(),
+    clear: vi.fn(),
+  };
+  const services = createServices({ userData }, { agent, watcher, terminals, keyInfo });
   registerIpc(host, services, bridge);
 
   return {
@@ -96,6 +103,8 @@ function harness() {
     watcher,
     terminals,
     services,
+    opened,
+    keyInfo,
     pick: (dir: string | null) => (nextPick = dir),
     invoke: <K extends InvokeChannel>(channel: K, ...args: InvokeArgs<K>) =>
       Promise.resolve(invokes.get(channel)!(...args)) as Promise<InvokeResult<K>>,
@@ -166,6 +175,8 @@ describe("settings", () => {
 describe("agent runs", () => {
   it("refuses to start without an API key, with a translatable code", async () => {
     const ipc = harness();
+    // The default (free mode) needs no key, so pick a provider that does.
+    await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "openai", model: "gpt-4o-mini", apiKey: "" });
     await ipc.invoke("fs:set-workspace", projectA);
     expect(await errorCode(ipc.invoke("agent:send", []))).toBe("no-api-key");
     expect(ipc.runs).toHaveLength(0);
@@ -245,5 +256,71 @@ describe("shutdown", () => {
     expect(ipc.watcher.stop).toHaveBeenCalled();
     expect(ipc.terminals.disposeAll).toHaveBeenCalledOnce();
     await sending;
+  });
+});
+
+describe("free mode", () => {
+  it("opens only https pages in the browser", async () => {
+    const ipc = harness();
+    await ipc.invoke("shell:open-external", "https://openrouter.ai/keys");
+    expect(ipc.opened).toEqual(["https://openrouter.ai/keys"]);
+    for (const bad of ["http://openrouter.ai/keys", "file:///C:/Windows/system32/calc.exe", "javascript:alert(1)", "https://user:pw@evil.test/", 42]) {
+      expect(await errorCode(ipc.invokeRaw("shell:open-external", bad))).toBe("invalid-argument");
+    }
+    expect(ipc.opened).toHaveLength(1);
+  });
+
+  it("reports OpenRouter's free-model allowance for the user's own key, and forgets it when settings change", async () => {
+    const ipc = harness();
+    await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "free", apiKey: "sk-or-v1-own" });
+    expect(ipc.keyInfo.clear).toHaveBeenCalled();
+    const daily = await ipc.invoke("usage:get-daily");
+    expect(daily).toMatchObject({ provider: "free", keyInfo: { dailyRequestsRemaining: 48 } });
+    expect(ipc.keyInfo.get).toHaveBeenCalledWith("sk-or-v1-own");
+
+    // Keyless (gateway) free mode and other providers do not look the key up.
+    ipc.keyInfo.get.mockClear();
+    await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "free", apiKey: "" });
+    expect(await ipc.invoke("usage:get-daily")).not.toHaveProperty("keyInfo");
+    expect(ipc.keyInfo.get).not.toHaveBeenCalled();
+  });
+
+  it("says whether free mode can run: with a key, or a gateway URL, but not with neither", async () => {
+    const ipc = harness();
+    const previous = process.env.ARCHYMEDES_FREE_GATEWAY_URL;
+    delete process.env.ARCHYMEDES_FREE_GATEWAY_URL;
+    try {
+      await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "free", apiKey: "" });
+      expect(await ipc.invoke("free:ready")).toBe(false);
+      await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "free", apiKey: "sk-or-v1-own" });
+      expect(await ipc.invoke("free:ready")).toBe(true);
+    } finally {
+      if (previous !== undefined) process.env.ARCHYMEDES_FREE_GATEWAY_URL = previous;
+    }
+  });
+
+  it("checks an empty key without any network request", async () => {
+    const ipc = harness();
+    expect(await ipc.invoke("free:check-key", "   ")).toEqual({ ok: false, reason: "empty" });
+  });
+});
+
+describe("legacy chats", () => {
+  it("moves chats without a project into the open folder, and only those", { timeout: 30_000 }, async () => {
+    const ipc = harness();
+    const sessions = path.join(userData, "sessions");
+    await fs.mkdir(sessions, { recursive: true });
+    await fs.writeFile(path.join(sessions, "old-1.json"), JSON.stringify({ id: "old-1", title: "old", createdAt: 1, updatedAt: 1, messages: [] }));
+    await ipc.invoke("fs:set-workspace", projectB);
+    await ipc.invoke("session:save", { id: "b-1", title: "b", createdAt: 1, updatedAt: 1, messages: [] });
+    await ipc.invoke("fs:set-workspace", projectA);
+
+    expect(await ipc.invoke("session:legacy")).toEqual({ count: 1, ids: ["old-1"] });
+    expect(await errorCode(ipc.invokeRaw("session:adopt-legacy", ["../escape"]))).toBe("invalid-argument");
+    expect(await ipc.invoke("session:adopt-legacy", "all")).toBe(1);
+    expect((await ipc.invoke("session:list")).map((s) => s.id)).toEqual(["old-1"]);
+    expect(await ipc.invoke("session:legacy")).toEqual({ count: 0, ids: [] });
+    await ipc.invoke("fs:set-workspace", projectB);
+    expect((await ipc.invoke("session:list")).map((s) => s.id)).toEqual(["b-1"]);
   });
 });

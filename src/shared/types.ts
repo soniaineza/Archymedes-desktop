@@ -44,6 +44,14 @@ export interface ChatMessage {
   pending?: boolean;
   /** A message waiting for the current run to finish; UI-only, never sent or saved. */
   queued?: boolean;
+  /** Tokens the model turn that produced this assistant message used; shown under it, never sent. */
+  usage?: MessageUsage;
+}
+
+/** Tokens one model turn used, as the provider reported them. */
+export interface MessageUsage {
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** Currency the price catalog publishes in; costs are converted from it. */
@@ -54,6 +62,7 @@ export type AgentStatus =
   | "thinking"
   | "calling-tool"
   | "awaiting-model"
+  | "retrying"
   | "awaiting-approval"
   | "error";
 
@@ -93,9 +102,10 @@ export interface ProviderSettings {
   commandApproval: CommandApprovalMode;
 }
 
+/** Keyless by default: free mode needs no API key (see src/main/agent/free-adapter.ts). */
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
-  provider: "anthropic",
-  model: PROVIDER_INFO.anthropic.defaultModel,
+  provider: "free",
+  model: PROVIDER_INFO.free.defaultModel,
   apiKey: "",
   baseUrl: "",
   maxIterations: 40,
@@ -124,6 +134,50 @@ export interface CostInfo {
   /** Unpriced models report unknown rather than zero. */
   unpriced: boolean;
 }
+
+/** The free gateway's daily allowance, from its response headers (absent with the user's own key). */
+export interface FreeAllowance {
+  /** Tokens left today, already minus the request that reported it; absent when the gateway did not say. */
+  remainingTokens?: number;
+  /** Requests left today (`x-free-remaining-requests`), already minus the request that reported it. */
+  remainingRequests?: number;
+  /** ISO time the allowance resets, when the gateway said. */
+  resetUtc?: string;
+  /** The gateway's warning text once most of the allowance is used. */
+  warning?: string;
+}
+
+/** Tokens used today (UTC), counted on this computer across every run and provider. */
+export interface DailyUsage {
+  /** UTC date, YYYY-MM-DD. */
+  date: string;
+  tokens: number;
+  allowance?: FreeAllowance;
+  /** The provider in the current settings, so the status bar knows whether free-mode figures apply. */
+  provider: ProviderId;
+  /** Free mode with the user's own OpenRouter key: what OpenRouter reports for that key (cached ~60s). */
+  keyInfo?: FreeKeyInfo;
+}
+
+/**
+ * What OpenRouter's key endpoint (GET https://openrouter.ai/api/v1/key) says about a key, reduced to
+ * what free mode shows. Every field is optional: OpenRouter may omit any of them.
+ */
+export interface FreeKeyInfo {
+  /** True when the account has never bought credits. */
+  isFreeTier?: boolean;
+  /** Free-model (`:free`) requests allowed per UTC day for this account. */
+  dailyRequestLimit?: number;
+  /** Free-model requests used today, as OpenRouter counted them. */
+  dailyRequestsUsed?: number;
+  /** Free-model requests left today. */
+  dailyRequestsRemaining?: number;
+}
+
+/** The result of testing an OpenRouter key from Settings. The key itself is never echoed back. */
+export type FreeKeyCheck =
+  | { ok: true; info: FreeKeyInfo }
+  | { ok: false; reason: "empty" | "invalid-key" | "rate-limited" | "network" | "server"; status?: number };
 
 // ---------- Terminal ----------
 
@@ -179,6 +233,12 @@ export interface SymbolHit {
 
 // ---------- Sessions ----------
 
+/** Chats saved before chats were linked to a project folder (they carry no folder). */
+export interface LegacySessionInfo {
+  count: number;
+  ids: string[];
+}
+
 export interface SessionSummary {
   id: string;
   title: string;
@@ -233,8 +293,9 @@ export type AgentEvent =
       args: string;
     }
   | { type: "tool-result"; toolCallId: string; result: string; isError: boolean }
-  | { type: "message-end"; id: string }
+  | { type: "message-end"; id: string; usage?: MessageUsage }
   | { type: "cost"; cost: CostInfo }
+  | { type: "daily-usage"; usage: DailyUsage }
   | { type: "approval-request"; requestId: string; toolCallId: string; command: string }
   | { type: "approval-resolved"; requestId: string; decision: ApprovalDecision }
   | { type: "done" }

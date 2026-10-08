@@ -131,4 +131,17 @@ describe("AgentPanel", () => {
     expect(fakeApi().approveCommand).toHaveBeenCalledWith("approval-1", "deny");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });
+
+  it("shows the tokens each reply used under it", () => {
+    renderWithProviders(<Harness />);
+
+    emit(
+      { type: "message-start", id: "m1" },
+      { type: "text-delta", id: "m1", delta: "Here you go" },
+      { type: "message-end", id: "m1", usage: { inputTokens: 1_200, outputTokens: 340 } },
+      { type: "status", status: "idle" },
+    );
+
+    expect(screen.getByText("↑1.2K ↓340 tokens")).toBeInTheDocument();
+  });
 });

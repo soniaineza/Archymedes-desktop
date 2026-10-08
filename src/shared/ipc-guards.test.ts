@@ -92,4 +92,13 @@ describe("channel guards", () => {
     invalidArgument(() => SEND_GUARDS["term:resize"](["term-1", 0, 24]));
     invalidArgument(() => SEND_GUARDS["term:resize"](["term-1", 80, Number.NaN]));
   });
+
+  it("accepts a model-list request and strips unknown fields", () => {
+    expect(INVOKE_GUARDS["models:list"]([{ provider: "openrouter", apiKey: "k", baseUrl: "", refresh: true, extra: 1 }])).toEqual([
+      { provider: "openrouter", apiKey: "k", baseUrl: "", refresh: true },
+    ]);
+    expect(INVOKE_GUARDS["models:list"]([{ provider: "archymedes-cloud", apiKey: "", baseUrl: "" }])).toEqual([{ provider: "archymedes-cloud", apiKey: "", baseUrl: "" }]);
+    invalidArgument(() => INVOKE_GUARDS["models:list"]([{ provider: "nope", apiKey: "", baseUrl: "" }]));
+    invalidArgument(() => INVOKE_GUARDS["models:list"]([{ provider: "openai", apiKey: "", baseUrl: "", refresh: "yes" }]));
+  });
 });

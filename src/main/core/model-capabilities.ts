@@ -21,6 +21,9 @@ function exactCapabilities(models: readonly string[], contextWindow: number, max
 const KNOWN_CAPABILITIES: ReadonlyArray<CapabilityEntry> = [
   // Free mode's router: conservative until a concrete free model is chosen per request.
   ...exactCapabilities(["openrouter/free"], 32_768, 4_096),
+  // Archymedes Cloud's virtual model before policy routing picks a concrete one: the client cannot
+  // know the routed model's limits yet, so it is explicitly conservative (same as the CLI).
+  { prefix: "auto", match: "exact", capabilities: { ...CONSERVATIVE_CAPABILITIES } },
   { prefix: "gemini-2.5-pro", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: true } },
   { prefix: "gemini-2.5-flash", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: true } },
   { prefix: "gemini", match: "prefix", capabilities: { contextWindow: 1_048_576, maxOutputTokens: 65_536, supportsEffort: false } },
@@ -31,14 +34,16 @@ const KNOWN_CAPABILITIES: ReadonlyArray<CapabilityEntry> = [
   ...exactCapabilities(["llama-3.3-70b-versatile"], 131_072, 32_768),
 
   { prefix: "claude-fable-5", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
+  { prefix: "claude-mythos-5", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
   { prefix: "claude-opus-5", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
   { prefix: "claude-opus-4-8", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
   { prefix: "claude-opus-4-7", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
   { prefix: "claude-opus-4-6", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
   { prefix: "claude-sonnet-5", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
-  { prefix: "claude-sonnet-4-6", match: "prefix", capabilities: { contextWindow: 200_000, maxOutputTokens: 64_000, supportsEffort: true } },
+  { prefix: "claude-sonnet-4-6", match: "prefix", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 64_000, supportsEffort: true } },
   { prefix: "claude-sonnet-4-5", match: "prefix", capabilities: { contextWindow: 200_000, maxOutputTokens: 64_000, supportsEffort: true } },
   { prefix: "claude-haiku-4-5", match: "prefix", capabilities: { contextWindow: 200_000, maxOutputTokens: 64_000, supportsEffort: false } },
+  { prefix: "claude", match: "exact", capabilities: { contextWindow: 1_000_000, maxOutputTokens: 128_000, supportsEffort: true } },
 
   // OpenAI rows match exactly on purpose: `gpt-5.4-mini` is a different model
   // from `gpt-5.4`, and a prefix rule would hand minis the flagship's window.

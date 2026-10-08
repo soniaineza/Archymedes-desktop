@@ -1,7 +1,8 @@
 import { AppError } from "./app-error";
 import type { InvokeArgs, InvokeChannel, IpcSendMap, SendChannel } from "./ipc-contract";
+import type { ModelListRequest } from "./model-catalog";
 import { isProviderId } from "./providers";
-import type { ApprovalDecision, ChatMessage, ChatRole, CommandApprovalMode, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
+import type { ApprovalDecision, ChatMessage, ChatRole, MessageUsage, CommandApprovalMode, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
 import { isApprovalDecision, isCommandApprovalMode, isTerminalShellChoice } from "./types";
 
 /**
@@ -37,6 +38,24 @@ const int = (min: number, max: number): Guard<number> => (v, name) => {
   return Number.isInteger(n) && n >= min && n <= max ? n : invalid(name, `an integer from ${min} to ${max}`);
 };
 
+/** An https:// URL without credentials: the only kind the renderer may open in the browser. */
+const httpsUrl: Guard<string> = (v, name) => {
+  const s = str(v, name);
+  if (s.length > 2048) return invalid(name, "an https URL");
+  try {
+    const url = new URL(s);
+    if (url.protocol === "https:" && !url.username && !url.password && url.hostname) return url.href;
+  } catch {
+    // fall through
+  }
+  return invalid(name, "an https URL");
+};
+
+const sessionId: Guard<string> = (v, name) => {
+  const s = nonEmpty(v, name);
+  return s.length <= 200 && /^[\w-]+$/.test(s) ? s : invalid(name, "a session id");
+};
+
 const bool: Guard<boolean> = (v, name) => (typeof v === "boolean" ? v : invalid(name, "a boolean"));
 
 function record(v: unknown, name: string): Record<string, unknown> {
@@ -63,6 +82,15 @@ const toolCall: Guard<ToolCallInfo> = (v, name) => {
   };
 };
 
+/** A message's token caption; kept so a reloaded session still shows it. */
+const messageUsage: Guard<MessageUsage> = (v, name) => {
+  const o = record(v, name);
+  return {
+    inputTokens: int(0, Number.MAX_SAFE_INTEGER)(o.inputTokens, `${name}.inputTokens`),
+    outputTokens: int(0, Number.MAX_SAFE_INTEGER)(o.outputTokens, `${name}.outputTokens`),
+  };
+};
+
 const chatMessage: Guard<ChatMessage> = (v, name) => {
   const o = record(v, name);
   const role = str(o.role, `${name}.role`);
@@ -72,6 +100,7 @@ const chatMessage: Guard<ChatMessage> = (v, name) => {
     role: role as ChatRole,
     content: str(o.content, `${name}.content`),
     ...(o.toolCalls === undefined ? {} : { toolCalls: list(toolCall, 1000)(o.toolCalls, `${name}.toolCalls`) }),
+    ...(o.usage === undefined ? {} : { usage: messageUsage(o.usage, `${name}.usage`) }),
   };
 };
 
@@ -98,6 +127,19 @@ export const providerSettings: Guard<ProviderSettings> = (v, name) => {
     terminalShellPath: str(o.terminalShellPath, `${name}.terminalShellPath`),
     // Settings saved before approvals existed have no field; they get the safe default.
     commandApproval: o.commandApproval === undefined ? "ask" : commandApprovalMode(o.commandApproval, `${name}.commandApproval`),
+  };
+};
+
+/** A model-list request: only what is needed to ask one provider for its list. */
+export const modelListRequest: Guard<ModelListRequest> = (v, name) => {
+  const o = record(v, name);
+  const provider = str(o.provider, `${name}.provider`);
+  if (!isProviderId(provider)) invalid(`${name}.provider`, "a known provider");
+  return {
+    provider: provider as ModelListRequest["provider"],
+    apiKey: str(o.apiKey, `${name}.apiKey`),
+    baseUrl: str(o.baseUrl, `${name}.baseUrl`),
+    ...(o.refresh === undefined ? {} : { refresh: bool(o.refresh, `${name}.refresh`) }),
   };
 };
 
@@ -147,9 +189,17 @@ export const INVOKE_GUARDS: InvokeGuards = {
 
   "settings:get": none("settings:get"),
   "settings:save": ([settings]) => [providerSettings(settings, "settings")],
+  "models:list": ([request]) => [modelListRequest(request, "request")],
 
   "agent:send": ([history]) => [chatHistory(history, "history")],
   "agent:cancel": none("agent:cancel"),
+  "usage:get-daily": none("usage:get-daily"),
+  "free:check-key": ([key]) => {
+    const value = str(key, "apiKey");
+    return [value.length <= 1000 ? value : invalid("apiKey", "at most 1000 characters")];
+  },
+  "free:ready": none("free:ready"),
+  "shell:open-external": ([url]) => [httpsUrl(url, "url")],
   "agent:approve": ([requestId, decision]) => [nonEmpty(requestId, "requestId"), approvalDecision(decision, "decision")],
 
   "git:get-info": none("git:get-info"),
@@ -160,7 +210,10 @@ export const INVOKE_GUARDS: InvokeGuards = {
   "session:load": ([id]) => [nonEmpty(id, "id")],
   "session:save": ([session]) => [sessionData(session, "session")],
   "session:delete": ([id]) => [nonEmpty(id, "id")],
+  "session:delete-all": none("session:delete-all"),
   "session:rename": ([id, title]) => [nonEmpty(id, "id"), str(title, "title")],
+  "session:legacy": none("session:legacy"),
+  "session:adopt-legacy": ([ids]) => [ids === "all" ? "all" : list(sessionId, 10_000)(ids, "ids")],
 
   "diff:file": ([path]) => [relPath(path, "relPath")],
   "diff:revert": ([path]) => [relPath(path, "relPath")],
