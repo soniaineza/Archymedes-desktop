@@ -35,6 +35,15 @@ const PREFERENCE = [
   "poolside/laguna-xs-2.1:free",
 ];
 const MAX_ATTEMPTS = 4;
+/**
+ * How long a fetched eligibility listing is reused. One hour, matching the CLI's
+ * `FREE_CATALOG_TTL_MS` and the free gateway's own hourly refresh — a client cache staler than its
+ * source would offer models that have since stopped qualifying. The two ports held different values
+ * (6h here's counterpart, 1h here) until they were reconciled; keep them equal.
+ *
+ * A freshness budget, never a safety one: the zero price cap and `allow_fallbacks: false` are
+ * re-asserted on every request, so a stale entry costs a wasted attempt and never a charge.
+ */
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 const MAX_OUTPUT_TOKENS = 8_192;
 /** A free model that has not started streaming by then is skipped for the next candidate. */
