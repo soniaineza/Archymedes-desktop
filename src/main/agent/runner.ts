@@ -1,6 +1,7 @@
 import type { AgentEvent, ChatMessage, CostInfo, DailyUsage, FreeAllowance, MessageUsage, ProviderSettings } from "../../shared/types";
 import { AppError } from "../../shared/app-error";
 import { historyToTurns } from "./adapter";
+import { instructionsSection, loadProjectInstructions } from "./project-instructions";
 import type { AgentAdapter, HistoryToolResult, RuntimeTurn, ToolInvocation } from "./adapter";
 import { AGENT_TOOLS, executeTool } from "./tools";
 import { repairToolArgs } from "./tool-args";
@@ -181,7 +182,6 @@ export class AgentRunner {
 
     // Free mode's daily allowance is the scarce thing: send less (see token-saver.ts).
     const saver = tokenSaverFor(this.settings.provider);
-    const systemPrompt = systemPromptFor(this.settings.responseLanguage ?? "", { frugal: this.settings.provider === "free" });
 
     // Today's local token count, with the gateway's allowance when it reported one. The header
     // describes the state before the request, so this request's tokens come off it.
@@ -213,6 +213,10 @@ export class AgentRunner {
       const turns: RuntimeTurn[] = saver ? stubEarlierToolResults(replayed, runStart) : replayed;
       await expandMentions(turns, this.workspace, saver?.mentionChars);
       const budget = saver ? historyBudget(contextLimit, saver) : 0;
+      // Read once per run, so an edited AGENTS.md applies from the next message without a restart.
+      const systemPrompt =
+        systemPromptFor(this.settings.responseLanguage ?? "", { frugal: this.settings.provider === "free" }) +
+        instructionsSection(await loadProjectInstructions(this.workspace));
 
       while (iteration < this.settings.maxIterations) {
         if (this.controller.signal.aborted) break;
