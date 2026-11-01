@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PROVIDER_SETTINGS } from "../shared/types";
-import { loadSettings, migrateSettings, repairMisplacedKey, saveSettings } from "./settings";
+import { loadSettings as loadWith, migrateSettings, repairMisplacedKey, saveSettings as saveWith } from "./settings";
+import type { ProviderSettings } from "../shared/types";
+
+// These cover the settings shape; key encryption is covered in settings-encryption.test.ts.
+const plaintext = { cipher: null, allowPlaintext: true };
+const loadSettings = (dir: string) => loadWith(dir, plaintext);
+const saveSettings = (dir: string, s: ProviderSettings) => saveWith(dir, s, plaintext);
 
 let userData: string;
 const file = () => path.join(userData, "settings", "provider-settings.json");

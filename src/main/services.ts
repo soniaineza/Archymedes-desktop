@@ -10,6 +10,7 @@ import { DailyUsageStore } from "./usage-store";
 import { WorkspaceWatcher } from "./watcher";
 import { modelCacheFile, ModelListService } from "./models";
 import { KeyInfoService } from "./openrouter-key";
+import type { KeyStorage } from "./settings";
 
 export interface AppPaths {
   userData: string;
@@ -22,6 +23,8 @@ export interface AppPaths {
  */
 export interface AppServices {
   readonly paths: AppPaths;
+  /** How the API key is protected at rest (OS keystore via safeStorage, or an explicit plaintext opt-in). */
+  readonly keyStorage: KeyStorage;
   readonly workspace: WorkspaceSession;
   readonly snapshots: SnapshotStore;
   readonly agent: Pick<AgentRunController, "start" | "cancel">;
@@ -42,6 +45,8 @@ export interface AppServices {
 export type ServiceOverrides = Partial<Pick<AppServices, "workspace" | "agent" | "watcher" | "terminals" | "models" | "keyInfo">> & {
   /** Swap the model for a scripted one while keeping the real tool loop. */
   createAdapter?: AdapterFactory;
+  /** Defaults to no keystore and no plaintext opt-in: saving a key then fails closed. */
+  keyStorage?: KeyStorage;
 };
 
 export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}): AppServices {
@@ -71,6 +76,7 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
 
   return {
     paths,
+    keyStorage: overrides.keyStorage ?? { cipher: null, allowPlaintext: false },
     workspace,
     snapshots,
     agent,
