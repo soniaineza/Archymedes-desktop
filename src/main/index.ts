@@ -29,7 +29,9 @@ function createWindow(): void {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // preload uses Electron IPC APIs
+      // The preload only uses contextBridge/ipcRenderer/webFrame, all available when sandboxed
+      // (pinned by sandbox.test.ts).
+      sandbox: true,
       spellcheck: false,
     },
   });
