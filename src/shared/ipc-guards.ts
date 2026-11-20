@@ -1,6 +1,7 @@
 import { AppError } from "./app-error";
 import type { InvokeArgs, InvokeChannel, IpcSendMap, SendChannel } from "./ipc-contract";
 import type { ModelListRequest } from "./model-catalog";
+import type { EntRequest } from "./enterprise/api-types";
 import { isProviderId } from "./providers";
 import type { ApprovalDecision, ChatMessage, ChatRole, MessageUsage, CommandApprovalMode, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
 import { isApprovalDecision, isCommandApprovalMode, isTerminalShellChoice } from "./types";
@@ -169,6 +170,23 @@ export const sessionData: Guard<SessionData> = (v, name) => {
   };
 };
 
+/** An Enterprise API request: shape only; the API itself authorizes and validates the body. */
+export const entRequest: Guard<EntRequest> = (v, name) => {
+  const o = record(v, name);
+  const method = str(o.method, `${name}.method`);
+  if (method !== "GET" && method !== "POST" && method !== "PATCH") invalid(`${name}.method`, "GET, POST or PATCH");
+  const path = str(o.path, `${name}.path`);
+  if (path.length > 1000 || !/^\/v1\/workspaces\/[\w-]+\/[\w./?=&%-]*$/.test(path) || path.includes("..")) invalid(`${name}.path`, "a /v1/workspaces/… API path");
+  if (o.body !== undefined && JSON.stringify(o.body).length > 25_000_000) invalid(`${name}.body`, "under 25 MB");
+  return {
+    method: method as EntRequest["method"],
+    path,
+    ...(o.body === undefined ? {} : { body: o.body }),
+    ...(o.idempotencyKey === undefined ? {} : { idempotencyKey: (() => { const k = nonEmpty(o.idempotencyKey, `${name}.idempotencyKey`); return k.length <= 200 ? k : invalid(`${name}.idempotencyKey`, "at most 200 characters"); })() }),
+    ...(o.ifRevision === undefined ? {} : { ifRevision: int(0, Number.MAX_SAFE_INTEGER)(o.ifRevision, `${name}.ifRevision`) }),
+  };
+};
+
 type ArgsGuard<Args> = (args: unknown[]) => Args;
 
 function none(channel: string): ArgsGuard<[]> {
@@ -223,6 +241,11 @@ export const INVOKE_GUARDS: InvokeGuards = {
   "watch:stop": none("watch:stop"),
 
   "term:create": ([cwd, shell]) => [optionalStr(cwd, "cwd"), optionalStr(shell, "shell")],
+
+  "ent:request": ([request]) => [entRequest(request, "request")],
+  "ent:session": none("ent:session"),
+  "ent:sign-in": ([id]) => [sessionId(id, "actorId")],
+  "ent:reset-demo": none("ent:reset-demo"),
 };
 
 export const SEND_GUARDS: SendGuards = {

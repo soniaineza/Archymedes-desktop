@@ -78,6 +78,12 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "free:ready": async () => freeEndpoint(await loadSettings(userData, keyStorage)) !== undefined,
       "shell:open-external": (url) => bridge.openExternal(url),
 
+      // ---------- enterprise ----------
+      "ent:request": (request) => services.enterprise.request(request),
+      "ent:session": () => services.enterprise.session(),
+      "ent:sign-in": (actorId) => services.enterprise.signIn(actorId),
+      "ent:reset-demo": () => services.enterprise.resetDemo(),
+
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
       "search:workspace": (query, caseSensitive) => workspaceSearch(workspace.requireRoot(), query, caseSensitive),

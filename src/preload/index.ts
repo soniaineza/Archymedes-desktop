@@ -84,6 +84,11 @@ const api: ArchymedesApi = {
   terminalKill: (...args) => send("term:kill", ...args),
   onTerminalData: (handler) => subscribe("term:data", handler),
   onTerminalExit: (handler) => subscribe("term:exit", handler),
+
+  entRequest: (...args) => invoke("ent:request", ...args),
+  entSession: () => invoke("ent:session"),
+  entSignIn: (...args) => invoke("ent:sign-in", ...args),
+  entResetDemo: () => invoke("ent:reset-demo"),
 };
 
 contextBridge.exposeInMainWorld("archymedes", api);

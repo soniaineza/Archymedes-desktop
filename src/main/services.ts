@@ -11,6 +11,7 @@ import { WorkspaceWatcher } from "./watcher";
 import { modelCacheFile, ModelListService } from "./models";
 import { KeyInfoService } from "./openrouter-key";
 import type { KeyStorage } from "./settings";
+import { EnterpriseService } from "./enterprise/service";
 
 export interface AppPaths {
   userData: string;
@@ -38,6 +39,8 @@ export interface AppServices {
   readonly models: Pick<ModelListService, "list">;
   /** OpenRouter's view of the user's own key (free-model requests left today), cached a minute. */
   readonly keyInfo: Pick<KeyInfoService, "get" | "noteRequest" | "clear">;
+  /** The Orion enterprise OS backend (local pilot store under userData). */
+  readonly enterprise: Pick<EnterpriseService, "request" | "session" | "signIn" | "resetDemo">;
   /** Cancels the agent run, stops watching and kills every shell. Safe to call more than once. */
   dispose(): void;
 }
@@ -86,6 +89,7 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
     usage,
     models,
     keyInfo,
+    enterprise: new EnterpriseService(paths.userData),
     dispose() {
       agent.cancel();
       approvals.denyAll();
