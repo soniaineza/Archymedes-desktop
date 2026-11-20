@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import type { ModelListing, ModelListRequest } from "./model-catalog";
 import type { EntRequest, EntResponse, SessionInfo } from "./enterprise/api-types";
+import type { WorkspaceInput } from "./enterprise/templates";
 
 /**
  * The complete main ↔ renderer contract. Each channel is declared once, here.
@@ -80,7 +81,10 @@ export interface IpcInvokeMap {
   "ent:session": { args: []; result: SessionInfo };
   /** Local pilot sign-in to a seeded identity (OIDC replaces this in a hosted deployment). */
   "ent:sign-in": { args: [actorId: string]; result: void };
-  "ent:reset-demo": { args: []; result: void };
+  /** Creates a company workspace from a business-model template; signs its admin in. */
+  "ent:create-workspace": { args: [input: WorkspaceInput]; result: void };
+  /** Deletes all local workspaces (back to onboarding). */
+  "ent:reset": { args: []; result: void };
 }
 
 /** Fire-and-forget: ipcRenderer.send → ipcMain.on. */
@@ -173,5 +177,6 @@ export interface ArchymedesApi {
   entRequest: Invoke<"ent:request">;
   entSession: Invoke<"ent:session">;
   entSignIn: Invoke<"ent:sign-in">;
-  entResetDemo: Invoke<"ent:reset-demo">;
+  entCreateWorkspace: Invoke<"ent:create-workspace">;
+  entReset: Invoke<"ent:reset">;
 }

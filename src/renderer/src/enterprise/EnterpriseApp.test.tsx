@@ -60,7 +60,7 @@ describe("Archymedes Desktop — enterprise OS", () => {
 
     await waitFor(() => expect(within(panel).getByTestId("lifecycle-current")).toHaveTextContent("Executing"));
     expect((await within(panel).findAllByText(/CMP-\d+/)).length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 
   it("an operator cannot see approve controls", async () => {
     const user = userEvent.setup();

@@ -82,7 +82,8 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "ent:request": (request) => services.enterprise.request(request),
       "ent:session": () => services.enterprise.session(),
       "ent:sign-in": (actorId) => services.enterprise.signIn(actorId),
-      "ent:reset-demo": () => services.enterprise.resetDemo(),
+      "ent:create-workspace": (input) => services.enterprise.createWorkspace(input),
+      "ent:reset": () => services.enterprise.resetAll(),
 
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),

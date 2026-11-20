@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { DecisionDetail, Evaluation } from "@shared/enterprise/api-types";
 import type { AlternativeInput, AlternativeResult } from "@shared/enterprise/types";
 import { date, EntCallError, money, pct, STATE_LABEL, stateTone, useEnt, useGet } from "./client";
+import { minorDigits } from "@shared/enterprise/money";
 import { Btn, Chip, ErrorLine, Facts, Field, Figure, SectionHead, SlidePanel } from "./ui";
 import { LifecycleRail, Meter, RangeStrip, ScenarioChart, Tornado } from "./viz";
 
@@ -351,6 +352,8 @@ function InputsEditor({ detail, onDone }: { detail: DecisionDetail; onDone(): vo
   const { call } = useEnt();
   const d = detail.decision;
   const base = d.alternatives.find((a) => a.isBaseline)!;
+  const { currency } = useEnt();
+  const unit = 10 ** minorDigits(detail.evaluations[0]?.snapshot.currency ?? currency);
   const [alts, setAlts] = useState<AlternativeInput[]>(() => structuredClone(d.alternatives));
   const [err, setErr] = useState<EntCallError | null>(null);
   const baseRev = (key: string) => base.scenarios.find((s) => s.key === key)?.revenueMinor ?? 0;
@@ -360,8 +363,8 @@ function InputsEditor({ detail, onDone }: { detail: DecisionDetail; onDone(): vo
       const sc = next[ai].scenarios[si];
       const v = raw === "" ? null : Number(raw);
       if (field === "probability") sc.probability = v === null ? null : v / 100;
-      if (field === "inc") sc.revenueMinor = v === null ? null : baseRev(sc.key) + Math.round(v * 100);
-      if (field === "cost") sc.actionCostMinor = v === null ? null : Math.round(v * 100);
+      if (field === "inc") sc.revenueMinor = v === null ? null : baseRev(sc.key) + Math.round(v * unit);
+      if (field === "cost") sc.actionCostMinor = v === null ? null : Math.round(v * unit);
       return next;
     });
   return (
@@ -388,10 +391,10 @@ function InputsEditor({ detail, onDone }: { detail: DecisionDetail; onDone(): vo
                       <input aria-label={`${a.name} ${s.label} probability`} type="number" step="1" value={s.probability === null ? "" : Math.round(s.probability * 1000) / 10} onChange={(e) => set(ai, si, "probability", e.target.value)} />
                     </td>
                     <td>
-                      <input aria-label={`${a.name} ${s.label} incremental revenue`} type="number" step="100" value={s.revenueMinor === null ? "" : (s.revenueMinor - baseRev(s.key)) / 100} onChange={(e) => set(ai, si, "inc", e.target.value)} />
+                      <input aria-label={`${a.name} ${s.label} incremental revenue`} type="number" step="100" value={s.revenueMinor === null ? "" : (s.revenueMinor - baseRev(s.key)) / unit} onChange={(e) => set(ai, si, "inc", e.target.value)} />
                     </td>
                     <td>
-                      <input aria-label={`${a.name} ${s.label} cost`} type="number" step="100" value={s.actionCostMinor === null ? "" : s.actionCostMinor / 100} onChange={(e) => set(ai, si, "cost", e.target.value)} />
+                      <input aria-label={`${a.name} ${s.label} cost`} type="number" step="100" value={s.actionCostMinor === null ? "" : s.actionCostMinor / unit} onChange={(e) => set(ai, si, "cost", e.target.value)} />
                     </td>
                   </tr>
                 ))}

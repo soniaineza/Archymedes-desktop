@@ -2,24 +2,10 @@ import { sha256Hex } from "../../shared/enterprise/sha256";
 import type { Decision, EnterpriseState, Objective } from "../../shared/enterprise/api-types";
 import type { DecisionSnapshot } from "../../shared/enterprise/types";
 
-/** JSON with object keys sorted, so equal data always hashes equally. */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.keys(value)
-      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`)
-      .join(",")}}`;
-  return JSON.stringify(value);
-}
+export { canonicalJson, hashSnapshot } from "../../shared/enterprise/snapshot-hash";
 
 export function sha256(text: string): string {
   return sha256Hex(text);
-}
-
-export function hashSnapshot(s: DecisionSnapshot): string {
-  return sha256(canonicalJson(s));
 }
 
 export function currentPolicy(state: EnterpriseState, tenantId: string) {

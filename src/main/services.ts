@@ -40,7 +40,7 @@ export interface AppServices {
   /** OpenRouter's view of the user's own key (free-model requests left today), cached a minute. */
   readonly keyInfo: Pick<KeyInfoService, "get" | "noteRequest" | "clear">;
   /** The Orion enterprise OS backend (local pilot store under userData). */
-  readonly enterprise: Pick<EnterpriseService, "request" | "session" | "signIn" | "resetDemo">;
+  readonly enterprise: Pick<EnterpriseService, "request" | "session" | "signIn" | "createWorkspace" | "resetAll">;
   /** Cancels the agent run, stops watching and kills every shell. Safe to call more than once. */
   dispose(): void;
 }

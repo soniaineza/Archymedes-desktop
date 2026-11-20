@@ -1,7 +1,8 @@
 import type { CompassTask, EnterpriseState, EntRequest, EntResponse, SessionInfo } from "../../shared/enterprise/api-types";
 import { EnterpriseApi } from "./api";
 import { LocalCompassAdapter } from "./compass-adapter";
-import { seedState } from "./seed";
+import { buildWorkspace, validateWorkspaceInput } from "../../shared/enterprise/templates";
+import type { WorkspaceInput } from "../../shared/enterprise/templates";
 
 export interface Persisted {
   state: EnterpriseState;
@@ -10,6 +11,11 @@ export interface Persisted {
 }
 
 /** Where a host keeps its state: a JSON file on desktop, localStorage on the web. */
+/** A store with no companies yet: the app opens on onboarding. */
+export function emptyState(): EnterpriseState {
+  return { schemaVersion: 1, seq: 0, tenants: [], members: [], profiles: [], policies: [], metrics: [], objectives: [], decisions: [], evaluations: [], approvals: [], work: [], evidence: [], outcomes: [], moats: [], audit: [], events: [], outbox: [], rows: [], imports: [], forecasts: [], idempotency: [], jobs: [] };
+}
+
 export interface PersistStore {
   load(): Promise<Persisted | null>;
   save(data: Persisted): Promise<void>;
@@ -47,7 +53,7 @@ export class EnterpriseHost {
     } catch {
       p = null;
     }
-    this.install(p ?? { state: seedState(this.now()), compass: [], actorId: null });
+    this.install(p ?? { state: emptyState(), compass: [], actorId: null });
   }
 
   private install(p: Persisted): void {
@@ -91,9 +97,42 @@ export class EnterpriseHost {
     return res;
   }
 
-  async resetDemo(): Promise<void> {
+  /** Creates a company workspace from a business-model template and signs its admin in. */
+  async createWorkspace(input: WorkspaceInput): Promise<void> {
     await this.ready();
-    this.install({ state: seedState(this.now()), compass: [], actorId: this.actorId });
+    const bad = validateWorkspaceInput(input);
+    if (bad.length) throw new Error(`Check these fields: ${bad.join(", ")}`);
+    const st = this.api.snapshot();
+    let n = 0;
+    const stamp = Date.parse(this.now()).toString(36);
+    const rand = () => Math.floor(Math.random() * 36 ** 4).toString(36).padStart(4, "0");
+    const w = buildWorkspace(input, this.now(), (prefix) => `${prefix}-${stamp}-${(++n).toString(36)}${rand()}`);
+    st.tenants.push(w.tenant);
+    st.members.push(...w.members);
+    st.profiles.push(w.profile);
+    st.policies.push(w.policy);
+    st.metrics.push(...w.metrics);
+    st.objectives.push(...w.objectives);
+    st.rows.push(...w.rows);
+    st.imports.push(...w.imports);
+    st.decisions.push(...w.decisions);
+    st.evaluations.push(...w.evaluations);
+    st.approvals.push(...w.approvals);
+    st.work.push(...w.work);
+    st.evidence.push(...w.evidence);
+    st.outcomes.push(...w.outcomes);
+    st.moats.push(...w.moats);
+    st.forecasts.push(...w.forecasts);
+    st.outbox.push(...w.outbox);
+    for (const a of w.audit) st.audit.push({ ...a, seq: ++st.seq });
+    this.actorId = w.members[0].id;
+    await this.flush();
+  }
+
+  /** Deletes every local workspace; the app returns to onboarding. */
+  async resetAll(): Promise<void> {
+    await this.ready();
+    this.install({ state: emptyState(), compass: [], actorId: null });
     await this.flush();
   }
 }

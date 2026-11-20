@@ -40,7 +40,8 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
     entRequest: vi.fn(async () => ({ status: 404, body: { error: { code: "not_found", message: "" } } })),
     entSession: vi.fn(async () => ({ actorId: null, identities: [] })),
     entSignIn: vi.fn(async () => {}),
-    entResetDemo: vi.fn(async () => {}),
+    entCreateWorkspace: vi.fn(async () => {}),
+    entReset: vi.fn(async () => {}),
     onAgentEvent: (handler) => {
       agentListeners.add(handler);
       return () => {

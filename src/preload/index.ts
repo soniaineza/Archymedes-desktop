@@ -88,7 +88,8 @@ const api: ArchymedesApi = {
   entRequest: (...args) => invoke("ent:request", ...args),
   entSession: () => invoke("ent:session"),
   entSignIn: (...args) => invoke("ent:sign-in", ...args),
-  entResetDemo: () => invoke("ent:reset-demo"),
+  entCreateWorkspace: (...args) => invoke("ent:create-workspace", ...args),
+  entReset: () => invoke("ent:reset"),
 };
 
 contextBridge.exposeInMainWorld("archymedes", api);

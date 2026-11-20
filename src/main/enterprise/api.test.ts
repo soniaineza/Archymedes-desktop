@@ -265,3 +265,44 @@ describe("acceptance checks (§11)", () => {
     expect((await restored.handle(KIVU.lead, { method: "GET", path: ws(KIVU.ws, `/decisions/${d.id}`) })).status).toBe(200);
   });
 });
+
+describe("company-agnostic configuration", () => {
+  it("an admin adds team members; others cannot", async () => {
+    const body = { name: "Riley Park", title: "Account executive", role: "operator", department: "Sales" };
+    expect((await post(KIVU.lead, "/members", body)).status).toBe(403);
+    const r = await post(KIVU.admin, "/members", body);
+    expect(r.status).toBe(201);
+    expect((await get(KIVU.admin, "/members")).body.members.some((m: { name: string }) => m.name === "Riley Park")).toBe(true);
+    expect((await get(r.body.member.id, "/today")).status).toBe(200);
+    expect((await post(KIVU.admin, "/members", { ...body, role: "owner" })).status).toBe(400);
+  });
+
+  it("profile edits create a new version and keep the currency fixed", async () => {
+    const r = await post(KIVU.admin, "/profile", { name: "Renamed Co", timezone: "Europe/Paris", fiscalYearStartMonth: 7, grossMarginBps: 5500 });
+    expect(r.status).toBe(201);
+    expect(r.body.profile).toEqual(expect.objectContaining({ version: 2, name: "Renamed Co", timezone: "Europe/Paris", fiscalYearStartMonth: 7, grossMarginBps: 5500, currency: "USD" }));
+    expect((await get(KIVU.admin, "/me")).body.tenant.name).toBe("Renamed Co");
+    expect((await post(KIVU.admin, "/profile", { timezone: "Nowhere/Zone" })).status).toBe(400);
+    expect((await post(KIVU.lead, "/profile", { name: "x" })).status).toBe(403);
+  });
+
+  it("a draft goal becomes active once target, deadline, owner and a data baseline are set", async () => {
+    const created = (await post(KIVU.admin, "/objectives", { name: "Revenue per week", metricId: KIVU.metric, direction: "increase", targetValue: 0 })).body.objective;
+    expect(created.status).toBe("draft");
+    const r = await post(KIVU.admin, `/objectives/${created.id}`, { targetValue: 100_000_00, deadline: "2027-03-31", ownerId: KIVU.lead, baselineFromData: { weeks: 13 } });
+    expect(r.status).toBe(200);
+    expect(r.body.objective.status).toBe("active");
+    expect(r.body.objective.missing).toEqual([]);
+    expect(r.body.objective.baseline.value).toBeGreaterThan(0);
+    expect(r.body.objective.version).toBe(2);
+  });
+
+  it("the first committed import maps billing metrics that had no source, as a new metric version", async () => {
+    const m = (await post(KIVU.admin, "/metrics", { name: "Billed amount", unit: "money", calc: { kind: "sum", field: "amount", filters: [] }, grain: "week", mapsFrom: "billing" })).body.metric;
+    expect(m.source).toBe("not mapped");
+    await post(KIVU.admin, "/imports", { csv: "invoice_id,date,amount\nINV-M-1,2026-11-19,10.00", mapping: { externalId: "invoice_id", occurredAt: "date", amount: "amount", defaultCurrency: "USD", extra: {} }, dryRun: false, source: "ledger.csv" });
+    const after = (await get(KIVU.admin, "/metrics")).body.metrics.find((x: { id: string }) => x.id === m.id);
+    expect(after.source).toBe("ledger.csv");
+    expect(after.version).toBe(m.version + 1);
+  });
+});
