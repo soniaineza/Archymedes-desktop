@@ -10,6 +10,8 @@ import { DailyUsageStore } from "./usage-store";
 import { WorkspaceWatcher } from "./watcher";
 import { modelCacheFile, ModelListService } from "./models";
 import { KeyInfoService } from "./openrouter-key";
+import type { KeyStorage } from "./settings";
+import { EnterpriseService } from "./enterprise/service";
 
 export interface AppPaths {
   userData: string;
@@ -22,6 +24,8 @@ export interface AppPaths {
  */
 export interface AppServices {
   readonly paths: AppPaths;
+  /** How the API key is protected at rest (OS keystore via safeStorage, or an explicit plaintext opt-in). */
+  readonly keyStorage: KeyStorage;
   readonly workspace: WorkspaceSession;
   readonly snapshots: SnapshotStore;
   readonly agent: Pick<AgentRunController, "start" | "cancel">;
@@ -35,6 +39,8 @@ export interface AppServices {
   readonly models: Pick<ModelListService, "list">;
   /** OpenRouter's view of the user's own key (free-model requests left today), cached a minute. */
   readonly keyInfo: Pick<KeyInfoService, "get" | "noteRequest" | "clear">;
+  /** The Orion enterprise OS backend (local pilot store under userData). */
+  readonly enterprise: Pick<EnterpriseService, "request" | "session" | "signIn" | "resetDemo">;
   /** Cancels the agent run, stops watching and kills every shell. Safe to call more than once. */
   dispose(): void;
 }
@@ -42,6 +48,8 @@ export interface AppServices {
 export type ServiceOverrides = Partial<Pick<AppServices, "workspace" | "agent" | "watcher" | "terminals" | "models" | "keyInfo">> & {
   /** Swap the model for a scripted one while keeping the real tool loop. */
   createAdapter?: AdapterFactory;
+  /** Defaults to no keystore and no plaintext opt-in: saving a key then fails closed. */
+  keyStorage?: KeyStorage;
 };
 
 export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}): AppServices {
@@ -71,6 +79,7 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
 
   return {
     paths,
+    keyStorage: overrides.keyStorage ?? { cipher: null, allowPlaintext: false },
     workspace,
     snapshots,
     agent,
@@ -80,6 +89,7 @@ export function createServices(paths: AppPaths, overrides: ServiceOverrides = {}
     usage,
     models,
     keyInfo,
+    enterprise: new EnterpriseService(paths.userData),
     dispose() {
       agent.cancel();
       approvals.denyAll();

@@ -12,6 +12,7 @@ import type { AgentRun } from "./agent/run-controller";
 import { registerIpc } from "./ipc";
 import type { HostBridge, IpcHost } from "./ipc-host";
 import { createServices } from "./services";
+import type { KeyStorage } from "./settings";
 
 /** An agent run that stays in flight until cancelled. */
 class PendingRun implements AgentRun {
@@ -53,7 +54,14 @@ afterEach(async () => {
 });
 
 /** Registers the real IPC layer against an in-memory host, the way Electron would call it. */
-function harness() {
+/** Electron's safeStorage stand-in: reversible, never the plaintext. */
+const fakeKeystore = {
+  isEncryptionAvailable: () => true,
+  encryptString: (plain: string) => Buffer.from(plain).reverse(),
+  decryptString: (encrypted: Buffer) => Buffer.from(encrypted).reverse().toString(),
+};
+
+function harness(keyStorage: KeyStorage = { cipher: fakeKeystore, allowPlaintext: false }) {
   const invokes = new Map<string, (...args: unknown[]) => unknown>();
   const sends = new Map<string, (...args: unknown[]) => void>();
   const host: IpcHost = {
@@ -92,7 +100,7 @@ function harness() {
     noteRequest: vi.fn(),
     clear: vi.fn(),
   };
-  const services = createServices({ userData }, { agent, watcher, terminals, keyInfo });
+  const services = createServices({ userData }, { agent, watcher, terminals, keyInfo, keyStorage });
   registerIpc(host, services, bridge);
 
   return {
@@ -169,6 +177,18 @@ describe("settings", () => {
     const settings = { ...DEFAULT_PROVIDER_SETTINGS, provider: "groq" as const, apiKey: "key" };
     await ipc.invoke("settings:save", settings);
     expect(await ipc.invoke("settings:get")).toEqual(settings);
+  });
+
+  it("keeps the API key out of the settings file", async () => {
+    const ipc = harness();
+    await ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "groq", apiKey: "gsk-very-secret" });
+    const raw = await fs.readFile(path.join(userData, "settings", "provider-settings.json"), "utf8");
+    expect(raw).not.toContain("gsk-very-secret");
+  });
+
+  it("refuses to save a key when there is no keystore and no plaintext opt-in", async () => {
+    const ipc = harness({ cipher: null, allowPlaintext: false });
+    await expect(ipc.invoke("settings:save", { ...DEFAULT_PROVIDER_SETTINGS, provider: "groq", apiKey: "gsk-very-secret" })).rejects.toThrow(/keyring/);
   });
 });
 

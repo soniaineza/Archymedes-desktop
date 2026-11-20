@@ -18,6 +18,7 @@ import type {
   TerminalInfo,
 } from "./types";
 import type { ModelListing, ModelListRequest } from "./model-catalog";
+import type { EntRequest, EntResponse, SessionInfo } from "./enterprise/api-types";
 
 /**
  * The complete main ↔ renderer contract. Each channel is declared once, here.
@@ -73,6 +74,13 @@ export interface IpcInvokeMap {
   "watch:stop": { args: []; result: void };
 
   "term:create": { args: [cwd?: string, shell?: string]; result: TerminalInfo };
+
+  /** Enterprise API call (spec §8), answered as the signed-in identity held by the main process. */
+  "ent:request": { args: [request: EntRequest]; result: EntResponse };
+  "ent:session": { args: []; result: SessionInfo };
+  /** Local pilot sign-in to a seeded identity (OIDC replaces this in a hosted deployment). */
+  "ent:sign-in": { args: [actorId: string]; result: void };
+  "ent:reset-demo": { args: []; result: void };
 }
 
 /** Fire-and-forget: ipcRenderer.send → ipcMain.on. */
@@ -160,4 +168,10 @@ export interface ArchymedesApi {
   terminalKill: Send<"term:kill">;
   onTerminalData: Subscribe<"term:data">;
   onTerminalExit: Subscribe<"term:exit">;
+
+  // enterprise
+  entRequest: Invoke<"ent:request">;
+  entSession: Invoke<"ent:session">;
+  entSignIn: Invoke<"ent:sign-in">;
+  entResetDemo: Invoke<"ent:reset-demo">;
 }

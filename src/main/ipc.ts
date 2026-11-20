@@ -21,6 +21,7 @@ import { isTerminalShellChoice } from "../shared/types";
 export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBridge): void {
   const { workspace, agent, watcher, terminals } = services;
   const { userData } = services.paths;
+  const { keyStorage } = services;
 
   const switchWorkspace = (next: string | null): void => {
     if (!workspace.setRoot(next)) return;
@@ -46,9 +47,9 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "fs:write-file": (relPath, content) => writeFileFromEditor(workspace.requireRoot(), relPath, content),
 
       // ---------- settings ----------
-      "settings:get": () => loadSettings(userData),
+      "settings:get": () => loadSettings(userData, keyStorage),
       "settings:save": async (settings) => {
-        await saveSettings(userData, settings);
+        await saveSettings(userData, settings, keyStorage);
         // A new key starts a fresh allowance lookup.
         services.keyInfo.clear();
       },
@@ -57,7 +58,7 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       // ---------- agent ----------
       "agent:send": async (history) => {
         const root = workspace.requireRoot();
-        const settings = await loadSettings(userData);
+        const settings = await loadSettings(userData, keyStorage);
         if (!settings.apiKey && PROVIDER_INFO[settings.provider]?.requiresApiKey !== false) {
           throw new AppError("no-api-key", `No API key configured for ${settings.provider}`);
         }
@@ -66,7 +67,7 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       "agent:cancel": () => agent.cancel(),
       "agent:approve": (requestId, decision) => services.approvals.resolve(requestId, decision),
       "usage:get-daily": async () => {
-        const [daily, settings] = await Promise.all([services.usage.snapshot(), loadSettings(userData)]);
+        const [daily, settings] = await Promise.all([services.usage.snapshot(), loadSettings(userData, keyStorage)]);
         // Free mode with the user's own key: OpenRouter's count of free-model requests (cached).
         const keyInfo = settings.provider === "free" && settings.apiKey.trim()
           ? await services.keyInfo.get(settings.apiKey).catch(() => null)
@@ -74,8 +75,14 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
         return { ...daily, provider: settings.provider, ...(keyInfo ? { keyInfo } : {}) };
       },
       "free:check-key": (apiKey) => checkOpenRouterKey(apiKey),
-      "free:ready": async () => freeEndpoint(await loadSettings(userData)) !== undefined,
+      "free:ready": async () => freeEndpoint(await loadSettings(userData, keyStorage)) !== undefined,
       "shell:open-external": (url) => bridge.openExternal(url),
+
+      // ---------- enterprise ----------
+      "ent:request": (request) => services.enterprise.request(request),
+      "ent:session": () => services.enterprise.session(),
+      "ent:sign-in": (actorId) => services.enterprise.signIn(actorId),
+      "ent:reset-demo": () => services.enterprise.resetDemo(),
 
       // ---------- git / search ----------
       "git:get-info": () => (workspace.root ? getGitInfo(workspace.root) : { isRepo: false, branch: "", dirtyCount: 0 }),
@@ -110,7 +117,7 @@ export function registerIpc(host: IpcHost, services: AppServices, bridge: HostBr
       // ---------- terminal ----------
       "term:create": async (cwd, shellOverride) => {
         // The saved setting is the default; the renderer's per-tab dropdown overrides it.
-        const settings = await loadSettings(userData);
+        const settings = await loadSettings(userData, keyStorage);
         const shellRequest =
           shellOverride && isTerminalShellChoice(shellOverride)
             ? { choice: shellOverride, customPath: settings.terminalShellPath }

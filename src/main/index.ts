@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import path from "node:path";
 import { registerIpc } from "./ipc";
 import { electronIpcHost } from "./ipc-host";
 import type { HostBridge } from "./ipc-host";
 import { createServices } from "./services";
+import { keyStorageFromSafeStorage } from "./settings";
 
 // Handle creating/destroying single-instance behavior on Windows
 const gotTheLock = app.requestSingleInstanceLock();
@@ -28,7 +29,9 @@ function createWindow(): void {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // preload uses Electron IPC APIs
+      // The preload only uses contextBridge/ipcRenderer/webFrame, all available when sandboxed
+      // (pinned by sandbox.test.ts).
+      sandbox: true,
       spellcheck: false,
     },
   });
@@ -85,7 +88,9 @@ app.on("second-instance", () => {
 });
 
 void app.whenReady().then(() => {
-  const services = createServices({ userData: app.getPath("userData") });
+  // safeStorage (and Linux's backend choice) is only meaningful once the app is ready.
+  const keyStorage = keyStorageFromSafeStorage(safeStorage, process.platform, process.env);
+  const services = createServices({ userData: app.getPath("userData") }, { keyStorage });
   void services.snapshots.prune(SNAPSHOT_RETENTION_MS);
   registerIpc(electronIpcHost(ipcMain), services, electronBridge());
   // Shells, the watcher and any agent run would otherwise outlive the window.

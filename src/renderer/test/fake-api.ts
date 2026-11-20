@@ -37,6 +37,10 @@ export function createFakeApi(overrides: Partial<ArchymedesApi> = {}): FakeApi {
     checkFreeKey: vi.fn(async () => ({ ok: true as const, info: { isFreeTier: true, dailyRequestLimit: 50 } })),
     isFreeReady: vi.fn(async () => true),
     openExternal: vi.fn(async () => {}),
+    entRequest: vi.fn(async () => ({ status: 404, body: { error: { code: "not_found", message: "" } } })),
+    entSession: vi.fn(async () => ({ actorId: null, identities: [] })),
+    entSignIn: vi.fn(async () => {}),
+    entResetDemo: vi.fn(async () => {}),
     onAgentEvent: (handler) => {
       agentListeners.add(handler);
       return () => {

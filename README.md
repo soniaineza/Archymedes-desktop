@@ -1,5 +1,23 @@
 # Archymedes Desktop
 
+**Orion-based enterprise operating system** (spec v0.1, 20 Nov 2026): define a
+measurable goal → compare interventions in Orion → approve one → execute through
+Compass → verify delivery → measure the outcome → improve the next decision.
+The app opens on the OS (Today · Goals · Decisions · Work · Outcomes · Settings);
+the coding agent below stays one click away as the **Workbench**.
+
+| Layer | Where |
+| --- | --- |
+| Domain (pure, tested): Orion reference evaluator, workflow, metrics, CSV import, measurement, calibration, moat | `src/shared/enterprise/` |
+| Enterprise API (`/v1/workspaces/{id}/…`), auth lanes, idempotency, revision preconditions, outbox, Compass adapter, seed tenants | `src/main/enterprise/` |
+| Swiss-grid UI, sliding panels, SVG charts | `src/renderer/src/enterprise/` |
+
+The §6 worked example is the calculator fixture (`evaluator.test.ts`); the §11
+acceptance checks and the §12 first ticket are `src/main/enterprise/api.test.ts`.
+Local pilot: state lives in `userData/enterprise/state.json`, sign-in picks a
+seeded identity held by the main process, Compass runs as an isolated local work
+store until a live workspace's isolation is verified.
+
 A coding agent that lives on your desktop. An Electron client for the
 [Archymedes](https://github.com/chrisnkuno/archymedes-cli) agent — chat with a
 model that reads, edits, and runs commands in your workspace, with every edit
