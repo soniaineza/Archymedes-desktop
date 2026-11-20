@@ -6,7 +6,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["out/**", "release/**", "node_modules/**"] },
+  { ignores: ["out/**", "release/**", "dist-web/**", "node_modules/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

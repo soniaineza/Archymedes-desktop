@@ -7,3 +7,5 @@ tsconfig.tsbuildinfo
 
 # Local environment files (secrets)
 .env*
+dist-web
+.vercel

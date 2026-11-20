@@ -1,0 +1,65 @@
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: #f4f3ef;
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0f0f0e;
+  }
+}
+.web-note {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(11, 11, 11, 0.45);
+  z-index: 100;
+  padding: 16px;
+}
+.web-note-card {
+  max-width: 460px;
+  background: #fcfcfb;
+  color: #0b0b0b;
+  border: 1px solid #0b0b0b;
+  padding: 28px;
+  font-family: "Inter", "Helvetica Neue", system-ui, sans-serif;
+}
+.web-note-card h2 {
+  margin: 0 0 12px;
+  font-size: 26px;
+  letter-spacing: -0.04em;
+}
+.web-note-card p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #52514e;
+}
+.web-note-card button {
+  margin-top: 8px;
+  border: 1px solid #0b0b0b;
+  background: #0b0b0b;
+  color: #f4f3ef;
+  padding: 10px 14px;
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  .ent {
+    grid-template-columns: 64px 1fr;
+  }
+  .ent-page {
+    padding: 0 16px 60px;
+  }
+  .ent-top {
+    grid-template-columns: 1fr auto;
+    padding: 10px 16px;
+  }
+  .ent-top-orion {
+    display: none;
+  }
+}

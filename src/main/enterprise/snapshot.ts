@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "../../shared/enterprise/sha256";
 import type { Decision, EnterpriseState, Objective } from "../../shared/enterprise/api-types";
 import type { DecisionSnapshot } from "../../shared/enterprise/types";
 
@@ -15,7 +15,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function sha256(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
+  return sha256Hex(text);
 }
 
 export function hashSnapshot(s: DecisionSnapshot): string {

@@ -19,7 +19,7 @@ const NAV: { id: Page; label: string; idx: string }[] = [
 const PAGE_KEY = "archymedes.ent.page";
 
 /** Archymedes Desktop — Orion-based enterprise operating system. */
-export function EnterpriseApp({ onOpenWorkbench }: { onOpenWorkbench(): void }) {
+export function EnterpriseApp({ onOpenWorkbench, edition = "desktop" }: { onOpenWorkbench(): void; edition?: "desktop" | "web" }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const load = useCallback(async () => setSession(await window.archymedes.entSession()), []);
   useEffect(() => {
@@ -30,6 +30,7 @@ export function EnterpriseApp({ onOpenWorkbench }: { onOpenWorkbench(): void }) 
   if (!me)
     return (
       <SignIn
+        edition={edition}
         session={session}
         onPick={async (id) => {
           await window.archymedes.entSignIn(id);
@@ -56,7 +57,7 @@ export function EnterpriseApp({ onOpenWorkbench }: { onOpenWorkbench(): void }) 
   );
 }
 
-function SignIn({ session, onPick, onOpenWorkbench }: { session: SessionInfo; onPick(id: string): void; onOpenWorkbench(): void }) {
+function SignIn({ session, onPick, onOpenWorkbench, edition }: { session: SessionInfo; onPick(id: string): void; onOpenWorkbench(): void; edition: "desktop" | "web" }) {
   const tenants = [...new Set(session.identities.map((i) => i.tenantName))];
   return (
     <div className="ent ent-signin">
@@ -92,7 +93,11 @@ function SignIn({ session, onPick, onOpenWorkbench }: { session: SessionInfo; on
             </div>
           </section>
         ))}
-        <p className="si-note">Local pilot sign-in · identity is held by the app’s main process, never asserted per request. OIDC replaces this for hosted workspaces.</p>
+        <p className="si-note">
+          {edition === "web"
+            ? "Web edition · a demo workspace that runs entirely in your browser and is saved only there. Sign in as anyone to see their view."
+            : "Local pilot sign-in · identity is held by the app’s main process, never asserted per request. OIDC replaces this for hosted workspaces."}
+        </p>
       </main>
       <footer className="si-foot">
         <button type="button" className="sx-link" onClick={onOpenWorkbench}>
