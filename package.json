@@ -1,6 +1,6 @@
 {
   "name": "archymedes-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Archymedes Desktop — an IDE-style desktop client for the Archymedes coding agent.",
   "license": "Apache-2.0",
