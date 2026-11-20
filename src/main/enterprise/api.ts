@@ -27,7 +27,8 @@ import { brierScore, measureOutcome } from "../../shared/enterprise/measurement"
 import { computeMetric, freshness } from "../../shared/enterprise/metrics";
 import { advanceMoat, moatPotentialMinor } from "../../shared/enterprise/moat";
 import { formatMoney } from "../../shared/enterprise/money";
-import type { AlternativeInput, ComparisonMethod, DecisionState, ImportMapping, ScenarioInput } from "../../shared/enterprise/types";
+import { isTimezone, objectiveReadiness } from "../../shared/enterprise/templates";
+import type { AlternativeInput, ComparisonMethod, DecisionState, ImportMapping, MetricCalc, MetricFilter, ScenarioInput } from "../../shared/enterprise/types";
 import { canTransition } from "../../shared/enterprise/workflow";
 import type { CompassAdapter } from "./compass-adapter";
 import { buildSnapshot, canonicalJson, currentPolicy, currentProfile, hashSnapshot, sha256 } from "./snapshot";
@@ -130,6 +131,31 @@ function parseAlternatives(v: unknown): AlternativeInput[] {
     };
   });
 }
+
+function parseFilters(v: unknown, name: string): MetricFilter[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > 10) throw bad(`${name} must be a list of up to 10 filters`);
+  return v.map((f, i) => {
+    const o = asObj(f, `${name}[${i}]`);
+    return { field: str(o, "field", 60), equals: str(o, "equals", 200) };
+  });
+}
+
+function parsePart(v: unknown, name: string): { kind: "sum" | "count"; field?: string; filters: MetricFilter[] } {
+  const o = asObj(v, name);
+  const kind = oneOf(o, "kind", ["sum", "count"] as const);
+  return { kind, ...(kind === "sum" ? { field: o.field === undefined ? "amount" : str(o, "field", 60) } : {}), filters: parseFilters(o.filters, `${name}.filters`) };
+}
+
+function parseCalc(v: unknown): MetricCalc {
+  const o = asObj(v, "calc");
+  const kind = oneOf(o, "kind", ["sum", "count", "ratio"] as const);
+  if (kind === "ratio") return { kind, numerator: parsePart(o.numerator, "calc.numerator"), denominator: parsePart(o.denominator, "calc.denominator") };
+  if (kind === "sum") return { kind, field: o.field === undefined ? "amount" : str(o, "field", 60), filters: parseFilters(o.filters, "calc.filters") };
+  return { kind, filters: parseFilters(o.filters, "calc.filters") };
+}
+
+const MISSING_LABEL: Record<string, string> = { owner: "an owner", source: "a data source", baselinePeriod: "a baseline period", deadline: "a target date", target: "a target" };
 
 // ---- authorization lanes ---------------------------------------------------
 
@@ -372,7 +398,16 @@ export class EnterpriseApi {
     };
   }
 
+  /** Recomputes what a goal still needs; a goal steers rankings only when nothing is missing. */
+  private refresh(o: Objective): Objective {
+    const metric = this.state.metrics.find((m) => m.id === o.metricId && m.tenantId === o.tenantId);
+    o.missing = objectiveReadiness(o, metric, this.tenantRows(o.tenantId).length);
+    o.status = o.missing.length ? "draft" : "active";
+    return o;
+  }
+
   private kpi(o: Objective): KpiCard {
+    this.refresh(o);
     const metric = this.state.metrics.find((m) => m.id === o.metricId && m.tenantId === o.tenantId)!;
     const profile = currentProfile(this.state, o.tenantId);
     const rows = this.tenantRows(o.tenantId);
@@ -381,16 +416,17 @@ export class EnterpriseApi {
     const nowMs = Date.parse(this.opts.now());
     const end = Math.floor(nowMs / DAY) * DAY + DAY;
     const weeks = 26;
-    const series = Array.from({ length: weeks }, (_, i) => {
+    // No records means no observations: show nothing rather than a line of zeros.
+    const series = (rows.length === 0 ? [] : Array.from({ length: weeks }, (_, i) => i)).map((i) => {
       const s = end - (weeks - i) * 7 * DAY;
       const v = computeMetric(metric.calc, rows, { start: new Date(s).toISOString(), end: new Date(s + 7 * DAY).toISOString() });
       return v.kind === "value" ? { t: new Date(s).toISOString(), value: v.value } : null;
     }).filter((x): x is { t: string; value: number } => x !== null);
-    const recent = computeMetric(metric.calc, rows, { start: new Date(end - 13 * 7 * DAY).toISOString(), end: new Date(end).toISOString() });
+    const recent: ReturnType<typeof computeMetric> = rows.length === 0 ? { kind: "unknown", reason: "no records imported" } : computeMetric(metric.calc, rows, { start: new Date(end - 13 * 7 * DAY).toISOString(), end: new Date(end).toISOString() });
     const actual = recent.kind === "value" ? recent.value : null;
     let forecast: KpiCard["forecast"] = null;
     let projection: KpiCard["projection"] = [];
-    if (series.length >= 8 && o.deadline) {
+    if (series.length >= 8 && o.deadline && !(o.direction === "increase" && !(o.targetValue > 0))) {
       const k = Math.max(1, Math.round((Date.parse(o.deadline) - end) / (7 * DAY)));
       if (metric.unit === "money") {
         const p = projectPeriod(series.map((x) => x.value), Math.min(k, 13), o.targetValue);
@@ -453,6 +489,67 @@ export class EnterpriseApi {
 
     this.on("GET", "/me", (ctx) => ok({ me: ctx.actor, tenant: ctx.tenant, profile: currentProfile(S(), ctx.tenant.id), policy: currentPolicy(S(), ctx.tenant.id), compass: this.opts.compass.kind }));
     this.on("GET", "/members", (ctx) => ok({ members: S().members.filter((m) => m.tenantId === ctx.tenant.id) }));
+    this.on("POST", "/members", (ctx, _p, req) => {
+      this.need(ctx, "configure");
+      const b = asObj(req.body);
+      const member: Member = {
+        id: this.id("u"),
+        tenantId: ctx.tenant.id,
+        name: str(b, "name", 120).trim() || (() => { throw bad("name must not be empty"); })(),
+        title: str(b, "title", 120, true),
+        role: oneOf(b, "role", ["admin", "executive", "lead", "operator", "finance", "auditor"] as const),
+        department: str(b, "department", 80, true),
+      };
+      S().members.push(member);
+      this.audit(ctx.tenant.id, ctx.actor.id, "member.added", `member/${member.id}`, null, null, ctx.correlationId, `${member.name} as ${member.role}`);
+      return ok({ member }, 201);
+    });
+    this.on("POST", "/profile", (ctx, _p, req) => {
+      this.need(ctx, "configure");
+      const b = asObj(req.body);
+      const cur = currentProfile(S(), ctx.tenant.id);
+      const next = { ...cur, version: cur.version + 1, createdAt: this.opts.now() };
+      if (b.name !== undefined) next.name = str(b, "name", 120).trim() || (() => { throw bad("name must not be empty"); })();
+      if (b.timezone !== undefined) {
+        const tz = str(b, "timezone", 64);
+        if (!isTimezone(tz)) throw bad("timezone must be an IANA zone like Europe/Paris");
+        next.timezone = tz;
+      }
+      if (b.fiscalYearStartMonth !== undefined) next.fiscalYearStartMonth = int(b, "fiscalYearStartMonth", 1, 12);
+      if (b.grossMarginBps !== undefined) next.grossMarginBps = b.grossMarginBps === null ? null : int(b, "grossMarginBps", 0, 10_000);
+      if (b.aiDataPolicy !== undefined) next.aiDataPolicy = oneOf(b, "aiDataPolicy", ["none", "aggregates_only", "redacted_records"] as const);
+      if (b.departments !== undefined) {
+        if (!Array.isArray(b.departments) || !b.departments.every((x) => typeof x === "string" && x.length <= 80)) throw bad("departments must be a list of names");
+        next.departments = (b.departments as string[]).slice(0, 30);
+      }
+      if (b.currency !== undefined && b.currency !== cur.currency) throw bad("currency is fixed once a workspace has data; create a new workspace to change it");
+      S().profiles.push(next);
+      ctx.tenant.name = next.name;
+      this.audit(ctx.tenant.id, ctx.actor.id, "profile.versioned", `profile/v${next.version}`, cur.version, next.version, ctx.correlationId, "applies prospectively");
+      return ok({ profile: next }, 201);
+    });
+    this.on("POST", "/metrics", (ctx, _p, req) => {
+      this.need(ctx, "configure");
+      const b = asObj(req.body);
+      const mapsFrom = b.mapsFrom === undefined ? undefined : oneOf(b, "mapsFrom", ["billing"] as const);
+      const metric: MetricDefinition = {
+        id: this.id("met"),
+        tenantId: ctx.tenant.id,
+        version: 1,
+        name: str(b, "name", 120),
+        description: str(b, "description", 500, true),
+        unit: oneOf(b, "unit", ["money", "count", "ratio"] as const),
+        calc: parseCalc(b.calc),
+        grain: b.grain === undefined ? "week" : oneOf(b, "grain", ["week", "month"] as const),
+        ownerId: ctx.actor.id,
+        source: mapsFrom ? "not mapped" : "manual",
+        freshnessHours: b.freshnessHours === undefined ? 36 : int(b, "freshnessHours", 1, 24 * 90),
+        ...(mapsFrom ? { mapsFrom } : {}),
+      };
+      S().metrics.push(metric);
+      this.audit(ctx.tenant.id, ctx.actor.id, "metric.created", `metric/${metric.id}`, null, 1, ctx.correlationId, metric.name);
+      return ok({ metric }, 201);
+    });
 
     this.on("GET", "/today", (ctx) => {
       const t = ctx.tenant.id;
@@ -475,7 +572,11 @@ export class EnterpriseApi {
         .map((w) => this.workView(w));
       const blockers = [
         ...S().work.filter((w) => w.tenantId === t && (w.state === "sync_failed" || w.state === "sync_pending" || w.blockedReason)).map((w) => `${w.title}: ${w.state === "sync_failed" ? "Compass sync failed — requeue" : (w.blockedReason ?? "Compass sync pending")}`),
-        ...S().objectives.filter((o) => o.tenantId === t && o.status === "draft").map((o) => `${o.name}: needs ${o.missing.join(", ")} before it can steer rankings`),
+        ...S()
+          .objectives.filter((o) => o.tenantId === t)
+          .map((o) => this.refresh(o))
+          .filter((o) => o.status === "draft")
+          .map((o) => `${o.name}: needs ${o.missing.map((k) => MISSING_LABEL[k] ?? k).join(", ")} before it can steer rankings`),
       ];
       const fc = S().forecasts.filter((f) => f.tenantId === t);
       const moats = S().moats.filter((m) => m.tenantId === t);
@@ -503,7 +604,7 @@ export class EnterpriseApi {
     });
 
     // ---- goals & metrics ----
-    this.on("GET", "/objectives", (ctx) => ok({ objectives: S().objectives.filter((o) => o.tenantId === ctx.tenant.id), kpis: S().objectives.filter((o) => o.tenantId === ctx.tenant.id).map((o) => this.kpi(o)) }));
+    this.on("GET", "/objectives", (ctx) => ok({ objectives: S().objectives.filter((o) => o.tenantId === ctx.tenant.id).map((o) => this.refresh(o)), kpis: S().objectives.filter((o) => o.tenantId === ctx.tenant.id).map((o) => this.kpi(o)) }));
     this.on("GET", "/metrics", (ctx) => ok({ metrics: S().metrics.filter((m) => m.tenantId === ctx.tenant.id) }));
     this.on("POST", "/objectives", (ctx, _p, req) => {
       this.need(ctx, "configure");
@@ -529,11 +630,43 @@ export class EnterpriseApi {
         createdAt: this.opts.now(),
       };
       o.interventionGoal.label = `≥ ${formatMoney(o.interventionGoal.target, currentProfile(S(), ctx.tenant.id).currency)} incremental revenue`;
-      o.missing = [!o.ownerId && "owner", metric.source === "not mapped" && "source", !o.baseline && "baselinePeriod", !o.deadline && "deadline"].filter((x): x is string => !!x);
-      o.status = o.missing.length ? "draft" : "active";
+      this.refresh(o);
       S().objectives.push(o);
       this.audit(ctx.tenant.id, ctx.actor.id, "objective.created", `objective/${o.id}`, null, 1, ctx.correlationId, o.status);
       return ok({ objective: o }, 201);
+    });
+    this.on("POST", "/objectives/{id}", (ctx, p, req) => {
+      this.need(ctx, "configure");
+      const o = this.scoped(S().objectives, ctx, p.id);
+      const b = asObj(req.body);
+      if (b.name !== undefined) o.name = str(b, "name", 160);
+      if (b.targetValue !== undefined) o.targetValue = num(b, "targetValue");
+      if (b.deadline !== undefined) o.deadline = b.deadline === null ? null : isoDate(b, "deadline");
+      if (b.ownerId !== undefined) o.ownerId = b.ownerId === null ? null : this.scoped(S().members, ctx, str(b, "ownerId", 80)).id;
+      if (b.direction !== undefined) o.direction = oneOf(b, "direction", ["increase", "decrease"] as const);
+      if (b.guardrails !== undefined) o.guardrails = Array.isArray(b.guardrails) ? b.guardrails.filter((x): x is string => typeof x === "string").slice(0, 10) : o.guardrails;
+      if (b.leadingIndicators !== undefined) o.leadingIndicators = Array.isArray(b.leadingIndicators) ? b.leadingIndicators.filter((x): x is string => typeof x === "string").slice(0, 10) : o.leadingIndicators;
+      if (b.interventionTargetMinor !== undefined) {
+        o.interventionGoal = { ...o.interventionGoal, target: int(b, "interventionTargetMinor", 1) };
+        o.interventionGoal.label = `≥ ${formatMoney(o.interventionGoal.target, currentProfile(S(), ctx.tenant.id).currency)} incremental revenue`;
+      }
+      if (b.baseline !== undefined) {
+        const bl = asObj(b.baseline, "baseline");
+        o.baseline = { value: num(bl, "value"), periodStart: isoDate(bl, "periodStart"), periodEnd: isoDate(bl, "periodEnd") };
+      }
+      if (b.baselineFromData !== undefined) {
+        const weeks = int(asObj(b.baselineFromData, "baselineFromData"), "weeks", 1, 104);
+        const metric = this.scoped(S().metrics, ctx, o.metricId);
+        const end = Math.floor(Date.parse(this.opts.now()) / DAY) * DAY + DAY;
+        const window = { start: new Date(end - weeks * 7 * DAY).toISOString(), end: new Date(end).toISOString() };
+        const v = computeMetric(metric.calc, this.tenantRows(ctx.tenant.id), window);
+        if (v.kind === "unknown") throw new ApiError(409, "baseline_unknown", `No baseline from data: ${v.reason}.`);
+        o.baseline = { value: v.value, periodStart: window.start, periodEnd: window.end };
+      }
+      o.version++;
+      this.refresh(o);
+      this.audit(ctx.tenant.id, ctx.actor.id, "objective.updated", `objective/${o.id}`, o.version - 1, o.version, ctx.correlationId, o.status);
+      return ok({ objective: o });
     });
 
     // ---- imports ----
@@ -562,6 +695,13 @@ export class EnterpriseApi {
       for (const r of preview.rows) S().rows.push({ ...r, id: this.id("row"), tenantId: ctx.tenant.id, importId });
       S().imports.push({ id: importId, tenantId: ctx.tenant.id, actorId: ctx.actor.id, source: typeof b.source === "string" ? b.source.slice(0, 120) : "upload.csv", createdAt: this.opts.now(), imported: preview.rows.length, duplicates: preview.duplicates.length, invalid: preview.invalid.length, missing: preview.missing.length });
       this.audit(ctx.tenant.id, ctx.actor.id, "import.committed", `import/${importId}`, null, null, ctx.correlationId, `${preview.rows.length} rows`);
+      // The first real billing import maps metrics that were waiting for a source, as a new metric version.
+      if (preview.rows.length)
+        for (const m of S().metrics.filter((x) => x.tenantId === ctx.tenant.id && x.mapsFrom === "billing" && x.source === "not mapped")) {
+          m.source = S().imports[S().imports.length - 1].source;
+          m.version++;
+          this.audit(ctx.tenant.id, ctx.actor.id, "metric.mapped", `metric/${m.id}`, m.version - 1, m.version, ctx.correlationId, m.source);
+        }
       return ok({ preview, imported: preview.rows.length, importId }, 201);
     });
 
@@ -653,6 +793,7 @@ export class EnterpriseApi {
       this.need(ctx, "decide");
       const d = this.scoped(S().decisions, ctx, p.id);
       const objective = this.scoped(S().objectives, ctx, d.objectiveId);
+      this.refresh(objective);
       if (objective.status !== "active") throw forbidden(`Objective "${objective.name}" needs ${objective.missing.join(", ")} before it can steer rankings.`, "objective_inactive");
       if (!["Draft", "Evaluated", "NeedsEvidence"].includes(d.state)) throw new ApiError(409, "invalid_transition", `A ${d.state} decision cannot be re-evaluated; revise it first.`);
       if (d.state === "NeedsEvidence") this.move(d, "Draft", ctx.actor.id, "re-evaluating");
@@ -749,7 +890,7 @@ export class EnterpriseApi {
             tenantId: d.tenantId,
             decisionId: d.id,
             actionId,
-            compassProjectId: "revenue-ops",
+            compassProjectId: "default",
             compassTaskId: null,
             title: `${chosen.name}`,
             doneWhen: [`Delivered to the ${d.cohortSize}-account cohort`, "Completion evidence attached", "Comparison cohort held out"],

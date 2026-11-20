@@ -247,7 +247,7 @@ export function ScenarioChart({ alternatives, currency }: { alternatives: Altern
                 <g>
                   <line className="vz-ev" x1={x0} x2={x0 + colW - 2} y1={y(a.evContributionMinor)} y2={y(a.evContributionMinor)} />
                   <text className="vz-ev-label" x={x0 + colW - 4} y={y(a.evContributionMinor) - 4} textAnchor="end">
-                    EV {money(a.evContributionMinor, currency)}
+                    Expected {money(a.evContributionMinor, currency)}
                   </text>
                 </g>
               )}
@@ -272,7 +272,7 @@ export function RangeStrip({ min, max, ev, lo, hi, currency }: { min: number; ma
   const x = (v: number) => 4 + ((v - lo) / (hi - lo || 1)) * (W - 8);
   return (
     <svg width={W} height={18} className="vz-inline" role="img" aria-label={`Range ${money(min, currency)} to ${money(max, currency)}, expected ${money(ev, currency)}`}>
-      <title>{`${money(min, currency)} … ${money(max, currency)} · EV ${money(ev, currency)}`}</title>
+      <title>{`${money(min, currency)} … ${money(max, currency)} · expected ${money(ev, currency)}`}</title>
       <line className="vz-zero" x1={x(0)} x2={x(0)} y1={2} y2={16} />
       <line className="vz-range" x1={x(min)} x2={x(max)} y1={9} y2={9} />
       <circle className="vz-dot" cx={x(ev)} cy={9} r={4} />
@@ -314,7 +314,7 @@ export function Tornado({ items, ev, runnerUp, currency }: { items: Sensitivity[
       <svg width={w} height={H}>
         <line className="vz-ev" x1={x(ev)} x2={x(ev)} y1={4} y2={H - 18} />
         <text className="vz-ev-label" x={x(ev) + 4} y={H - 6}>
-          EV {money(ev, currency)}
+          Expected {money(ev, currency)}
         </text>
         <line className="vz-guide" x1={x(runnerUp)} x2={x(runnerUp)} y1={4} y2={H - 18} />
         <text className="vz-axis" x={x(runnerUp) - 4} y={H - 6} textAnchor="end">
@@ -334,7 +334,7 @@ export function Tornado({ items, ev, runnerUp, currency }: { items: Sensitivity[
                 width={Math.max(2, x(s.highMinor) - x(s.lowMinor))}
                 height={16}
                 rx={2}
-                onMouseEnter={() => setTip({ x: x((s.lowMinor + s.highMinor) / 2), y: yy, body: <><b>{s.label}</b><span className="vz-tip-sub">EV {money(s.lowMinor, currency)} … {money(s.highMinor, currency)}{s.flipsRanking ? " · can flip the ranking" : ""}</span></> })}
+                onMouseEnter={() => setTip({ x: x((s.lowMinor + s.highMinor) / 2), y: yy, body: <><b>{s.label}</b><span className="vz-tip-sub">Expected {money(s.lowMinor, currency)} … {money(s.highMinor, currency)}{s.flipsRanking ? " · can flip the ranking" : ""}</span></> })}
                 onMouseLeave={() => setTip(null)}
               />
             </g>
@@ -461,7 +461,7 @@ export function PredictedVsMeasured({ rows, currency }: { rows: { label: string;
                 {r.label}
               </text>
               {r.predicted.ev !== null && (
-                <g onMouseEnter={() => setTip({ x: x(r.predicted.ev!), y: yy, body: <><b>Predicted</b> EV {money(r.predicted.ev, currency)}</> })} onMouseLeave={() => setTip(null)}>
+                <g onMouseEnter={() => setTip({ x: x(r.predicted.ev!), y: yy, body: <><b>Predicted</b> {money(r.predicted.ev, currency)}</> })} onMouseLeave={() => setTip(null)}>
                   {r.predicted.min !== undefined && <line className="vz-range-muted" x1={x(r.predicted.min)} x2={x(r.predicted.max!)} y1={yy + 8} y2={yy + 8} />}
                   <circle className="vz-dot-hollow" cx={x(r.predicted.ev)} cy={yy + 8} r={5} />
                 </g>
@@ -476,7 +476,7 @@ export function PredictedVsMeasured({ rows, currency }: { rows: { label: string;
       </svg>
       <div className="vz-legend">
         <span>
-          <i className="lg-hollow" /> Predicted (EV, scenario range)
+          <i className="lg-hollow" /> Predicted
         </span>
         <span>
           <i className="lg-dot" /> Measured (95% CI)

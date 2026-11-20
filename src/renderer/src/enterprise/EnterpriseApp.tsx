@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { BusinessProfile, KpiCard, SessionInfo } from "@shared/enterprise/api-types";
 import { roleLabel, useEnt, useGet } from "./client";
 import { EntProvider } from "./EntProvider";
+import { Onboarding } from "./Onboarding";
+import { GuidePanel, HowItWorks } from "./Guide";
 import { DecisionPanel } from "./DecisionPanel";
 import { DecisionsPage, GoalsPage, OutcomesPage, ProvenancePanel, SettingsPage, TodayPage, WorkPage } from "./views";
 import "./enterprise.css";
@@ -21,32 +23,46 @@ const PAGE_KEY = "archymedes.ent.page";
 /** Archymedes Desktop — Orion-based enterprise operating system. */
 export function EnterpriseApp({ onOpenWorkbench, edition = "desktop" }: { onOpenWorkbench(): void; edition?: "desktop" | "web" }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [creating, setCreating] = useState(false);
   const load = useCallback(async () => setSession(await window.archymedes.entSession()), []);
   useEffect(() => {
     void load();
   }, [load]);
   if (!session) return <div className="ent ent-boot" />;
   const me = session.identities.find((i) => i.id === session.actorId);
-  if (!me)
+  if (!me || creating)
     return (
-      <SignIn
-        edition={edition}
-        session={session}
-        onPick={async (id) => {
-          await window.archymedes.entSignIn(id);
-          await load();
-        }}
-        onOpenWorkbench={onOpenWorkbench}
-      />
+      <Welcome edition={edition} onOpenWorkbench={onOpenWorkbench}>
+        {session.identities.length === 0 || creating ? (
+          <Onboarding
+            onCancel={session.identities.length ? () => setCreating(false) : undefined}
+            onCreate={async (input) => {
+              await window.archymedes.entCreateWorkspace(input);
+              setCreating(false);
+              await load();
+            }}
+          />
+        ) : (
+          <SignIn
+            session={session}
+            onPick={async (id) => {
+              await window.archymedes.entSignIn(id);
+              await load();
+            }}
+            onNew={() => setCreating(true)}
+          />
+        )}
+      </Welcome>
     );
   return (
     <EntProvider key={me.id} me={me} onSignOut={() => setSession({ ...session, actorId: null })}>
       <Shell
         onOpenWorkbench={onOpenWorkbench}
         onReset={async () => {
-          await window.archymedes.entResetDemo();
+          await window.archymedes.entReset();
           await load();
         }}
+        onNewWorkspace={() => setCreating(true)}
         identities={session.identities}
         onSwitch={async (id) => {
           await window.archymedes.entSignIn(id);
@@ -57,8 +73,7 @@ export function EnterpriseApp({ onOpenWorkbench, edition = "desktop" }: { onOpen
   );
 }
 
-function SignIn({ session, onPick, onOpenWorkbench, edition }: { session: SessionInfo; onPick(id: string): void; onOpenWorkbench(): void; edition: "desktop" | "web" }) {
-  const tenants = [...new Set(session.identities.map((i) => i.tenantName))];
+function Welcome({ edition, onOpenWorkbench, children }: { edition: "desktop" | "web"; onOpenWorkbench(): void; children: React.ReactNode }) {
   return (
     <div className="ent ent-signin">
       <div className="si-grid" aria-hidden />
@@ -68,7 +83,7 @@ function SignIn({ session, onPick, onOpenWorkbench, edition }: { session: Sessio
           <h1>
             Archymedes
             <br />
-            Desktop
+            {edition === "web" ? "OS" : "Desktop"}
           </h1>
           <p className="si-formula">
             Winning = Good decisions <span>×</span> Effective execution <span>×</span> Continuous learning
@@ -77,26 +92,12 @@ function SignIn({ session, onPick, onOpenWorkbench, edition }: { session: Sessio
       </header>
       <main className="si-main">
         <p className="si-lede">Decide where to invest effort, act on the decision, and measure whether it improved the business.</p>
-        {tenants.map((t) => (
-          <section key={t} className="si-tenant" aria-label={t}>
-            <h2>{t}</h2>
-            <div className="si-ids">
-              {session.identities
-                .filter((i) => i.tenantName === t)
-                .map((i) => (
-                  <button key={i.id} type="button" className="si-id" onClick={() => onPick(i.id)}>
-                    <span className="si-id-role">{roleLabel(i.role)}</span>
-                    <span className="si-id-name">{i.name}</span>
-                    <span className="si-id-title">{i.title}</span>
-                  </button>
-                ))}
-            </div>
-          </section>
-        ))}
+        <HowItWorks />
+        {children}
         <p className="si-note">
           {edition === "web"
-            ? "Web edition · a demo workspace that runs entirely in your browser and is saved only there. Sign in as anyone to see their view."
-            : "Local pilot sign-in · identity is held by the app’s main process, never asserted per request. OIDC replaces this for hosted workspaces."}
+            ? "Web edition · workspaces run entirely in your browser and are saved only there. Nothing is sent to a server."
+            : "Local pilot · workspaces are stored on this computer and identity is held by the app’s main process. OIDC replaces this for hosted workspaces."}
         </p>
       </main>
       <footer className="si-foot">
@@ -108,7 +109,34 @@ function SignIn({ session, onPick, onOpenWorkbench, edition }: { session: Sessio
   );
 }
 
-function Shell({ onOpenWorkbench, onReset, identities, onSwitch }: { onOpenWorkbench(): void; onReset(): void; identities: SessionInfo["identities"]; onSwitch(id: string): void }) {
+function SignIn({ session, onPick, onNew }: { session: SessionInfo; onPick(id: string): void; onNew(): void }) {
+  const workspaces = [...new Map(session.identities.map((i) => [i.workspaceId, i.tenantName])).entries()];
+  return (
+    <>
+      {workspaces.map(([ws, name]) => (
+        <section key={ws} className="si-tenant" aria-label={name}>
+          <h2>{name}</h2>
+          <div className="si-ids">
+            {session.identities
+              .filter((i) => i.workspaceId === ws)
+              .map((i) => (
+                <button key={i.id} type="button" className="si-id" onClick={() => onPick(i.id)}>
+                  <span className="si-id-role">{roleLabel(i.role)}</span>
+                  <span className="si-id-name">{i.name}</span>
+                  <span className="si-id-title">{i.title}</span>
+                </button>
+              ))}
+          </div>
+        </section>
+      ))}
+      <button type="button" className="sx-btn sx-btn-ghost" onClick={onNew}>
+        Create another workspace
+      </button>
+    </>
+  );
+}
+
+function Shell({ onOpenWorkbench, onReset, onNewWorkspace, identities, onSwitch }: { onOpenWorkbench(): void; onReset(): void; onNewWorkspace(): void; identities: SessionInfo["identities"]; onSwitch(id: string): void }) {
   const { me, setCurrency } = useEnt();
   const [page, setPage] = useState<Page>(() => {
     try {
@@ -121,6 +149,7 @@ function Shell({ onOpenWorkbench, onReset, identities, onSwitch }: { onOpenWorkb
   const [openDecision, setOpenDecision] = useState<string | null>(null);
   const [explain, setExplain] = useState<KpiCard | null>(null);
   const [whoOpen, setWhoOpen] = useState(false);
+  const [guide, setGuide] = useState(false);
   const meInfo = useGet<{ profile: BusinessProfile; tenant: { name: string } }>("/me");
   useEffect(() => {
     if (meInfo.data) setCurrency(meInfo.data.profile.currency);
@@ -164,8 +193,11 @@ function Shell({ onOpenWorkbench, onReset, identities, onSwitch }: { onOpenWorkb
             </span>
           </div>
           <div className="ent-top-orion">
-            <span className="ent-pulse" aria-hidden /> Orion · deterministic evaluator ready
+            <span className="ent-pulse" aria-hidden /> Decision engine ready
           </div>
+          <button type="button" className="ent-help" onClick={() => setGuide(true)}>
+            How it works
+          </button>
           <div className="ent-who">
             <button type="button" className="ent-who-btn" aria-haspopup="menu" aria-expanded={whoOpen} onClick={() => setWhoOpen((v) => !v)}>
               <span className="ent-avatar">{me.name.split(" ").map((x) => x[0]).join("")}</span>
@@ -201,11 +233,12 @@ function Shell({ onOpenWorkbench, onReset, identities, onSwitch }: { onOpenWorkb
           {page === "decisions" && <DecisionsPage onOpen={setOpenDecision} />}
           {page === "work" && <WorkPage onOpen={setOpenDecision} />}
           {page === "outcomes" && <OutcomesPage onOpen={setOpenDecision} />}
-          {page === "settings" && <SettingsPage onReset={onReset} />}
+          {page === "settings" && <SettingsPage onReset={onReset} onNewWorkspace={onNewWorkspace} />}
         </main>
       </div>
       {openDecision && <DecisionPanel id={openDecision} onClose={() => setOpenDecision(null)} />}
       {explain && <ProvenancePanel kpi={explain} onClose={() => setExplain(null)} />}
+      {guide && <GuidePanel onClose={() => setGuide(false)} />}
     </div>
   );
 }

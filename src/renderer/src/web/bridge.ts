@@ -5,7 +5,7 @@ import type { Persisted } from "../../../main/enterprise/host";
 export const WEB_STATE_KEY = "archymedes.web.state.v1";
 
 type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-export type WebBridge = Pick<ArchymedesApi, "entRequest" | "entSession" | "entSignIn" | "entResetDemo">;
+export type WebBridge = Pick<ArchymedesApi, "entRequest" | "entSession" | "entSignIn" | "entCreateWorkspace" | "entReset">;
 
 /**
  * The web edition's stand-in for the Electron preload: the same Enterprise API
@@ -33,6 +33,7 @@ export function createWebBridge(storage: KeyValue, now?: () => string): WebBridg
     entRequest: (req) => host.request(structuredClone(req)),
     entSession: () => host.session(),
     entSignIn: (id) => host.signIn(id),
-    entResetDemo: () => host.resetDemo(),
+    entCreateWorkspace: (input) => host.createWorkspace(structuredClone(input)),
+    entReset: () => host.resetAll(),
   };
 }

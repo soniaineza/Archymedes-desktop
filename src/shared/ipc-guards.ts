@@ -2,6 +2,8 @@ import { AppError } from "./app-error";
 import type { InvokeArgs, InvokeChannel, IpcSendMap, SendChannel } from "./ipc-contract";
 import type { ModelListRequest } from "./model-catalog";
 import type { EntRequest } from "./enterprise/api-types";
+import { validateWorkspaceInput } from "./enterprise/templates";
+import type { WorkspaceInput } from "./enterprise/templates";
 import { isProviderId } from "./providers";
 import type { ApprovalDecision, ChatMessage, ChatRole, MessageUsage, CommandApprovalMode, ProviderSettings, SessionData, TerminalShellChoice, ToolCallInfo } from "./types";
 import { isApprovalDecision, isCommandApprovalMode, isTerminalShellChoice } from "./types";
@@ -187,6 +189,23 @@ export const entRequest: Guard<EntRequest> = (v, name) => {
   };
 };
 
+/** New-workspace input: shape and values checked here, again by the host. */
+export const workspaceInput: Guard<WorkspaceInput> = (v, name) => {
+  const o = record(v, name);
+  const admin = record(o.admin, `${name}.admin`);
+  const input: WorkspaceInput = {
+    companyName: str(o.companyName, `${name}.companyName`),
+    businessModel: str(o.businessModel, `${name}.businessModel`) as WorkspaceInput["businessModel"],
+    currency: str(o.currency, `${name}.currency`),
+    timezone: str(o.timezone, `${name}.timezone`),
+    fiscalYearStartMonth: int(1, 12)(o.fiscalYearStartMonth, `${name}.fiscalYearStartMonth`),
+    admin: { name: str(admin.name, `${name}.admin.name`), title: str(admin.title, `${name}.admin.title`) },
+    sampleData: bool(o.sampleData, `${name}.sampleData`),
+  };
+  const bad = validateWorkspaceInput(input);
+  return bad.length ? invalid(`${name}.${bad[0]}`, "valid") : input;
+};
+
 type ArgsGuard<Args> = (args: unknown[]) => Args;
 
 function none(channel: string): ArgsGuard<[]> {
@@ -245,7 +264,8 @@ export const INVOKE_GUARDS: InvokeGuards = {
   "ent:request": ([request]) => [entRequest(request, "request")],
   "ent:session": none("ent:session"),
   "ent:sign-in": ([id]) => [sessionId(id, "actorId")],
-  "ent:reset-demo": none("ent:reset-demo"),
+  "ent:create-workspace": ([input]) => [workspaceInput(input, "input")],
+  "ent:reset": none("ent:reset"),
 };
 
 export const SEND_GUARDS: SendGuards = {

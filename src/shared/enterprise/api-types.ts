@@ -106,6 +106,8 @@ export interface MetricDefinition {
   ownerId: string;
   source: string;
   freshnessHours: number;
+  /** Mapped automatically by the first committed import of this kind. */
+  mapsFrom?: "billing";
 }
 
 export interface Objective {

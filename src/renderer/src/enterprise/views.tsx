@@ -15,7 +15,9 @@ import type {
   WorkView,
 } from "@shared/enterprise/api-types";
 import type { ImportPreview } from "@shared/enterprise/types";
-import { annualPlanAlternative, baselineAlternative, leadFollowUpAlternative } from "@shared/enterprise/fixtures";
+import { minorDigits } from "@shared/enterprise/money";
+import { exampleAlternatives, templateFor } from "@shared/enterprise/templates";
+import type { AlternativeInput } from "@shared/enterprise/types";
 import { ago, date, EntCallError, metricValue, money, pct, roleLabel, sha256Hex, STATE_LABEL, stateTone, useEnt, useGet } from "./client";
 import { Btn, Chip, Empty, ErrorLine, Facts, Field, Figure, PageHead, SectionHead, SlidePanel } from "./ui";
 import { Calibration, GoalBullet, PredictedVsMeasured, StageBar, TrendChart } from "./viz";
@@ -89,7 +91,7 @@ export function TodayPage({ onOpen, onExplain }: { onOpen: Open; onExplain(k: Kp
                 Forecast <b>{metricValue(k.forecast?.value ?? null, k.unit, cur, true)}</b>
               </span>
               <span>
-                P(hit) <b>{pct(k.forecast?.pHit ?? null)}</b>
+                Chance of hitting <b>{pct(k.forecast?.pHit ?? null)}</b>
               </span>
             </footer>
           </article>
@@ -130,22 +132,24 @@ export function TodayPage({ onOpen, onExplain }: { onOpen: Open; onExplain(k: Kp
         </section>
 
         <aside className="sx-col">
-          <SectionHead index="1.4" title="Blockers" />
-          {data.blockers.length ? (
-            <ul className="sx-bullets">
-              {data.blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          ) : (
-            <Empty>No blockers.</Empty>
-          )}
-          <SectionHead index="1.5" title="Orion calibration" />
+          <section aria-labelledby="blk-h">
+            <SectionHead index="1.4" title="Blockers" id="blk-h" />
+            {data.blockers.length ? (
+              <ul className="sx-bullets">
+                {data.blockers.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            ) : (
+              <Empty>No blockers.</Empty>
+            )}
+          </section>
+          <SectionHead index="1.5" title="Forecast accuracy" />
           <div className="sx-grid sx-grid-2">
-            <Figure label="Brier score" value={data.calibration.score === null ? "—" : data.calibration.score.toFixed(3)} sub={`n = ${data.calibration.n} · lower is better`} />
-            <Figure label="Skill vs base rate" value={data.calibration.skill === null ? "—" : `${data.calibration.skill >= 0 ? "+" : ""}${(data.calibration.skill * 100).toFixed(0)}%`} sub={`base rate ${data.calibration.baseline?.toFixed(3) ?? "—"}`} />
+            <Figure label="Past forecast error" value={data.calibration.score === null ? "—" : data.calibration.score.toFixed(3)} sub={`n = ${data.calibration.n} · lower is better`} />
+            <Figure label="Better than guessing by" value={data.calibration.skill === null ? "—" : `${data.calibration.skill >= 0 ? "+" : ""}${(data.calibration.skill * 100).toFixed(0)}%`} sub={`base rate ${data.calibration.baseline?.toFixed(3) ?? "—"}`} />
           </div>
-          <SectionHead index="1.6" title="Defensibility" />
+          <SectionHead index="1.6" title="Lasting advantages" />
           <StageBar
             currency={cur}
             parts={[
@@ -175,7 +179,7 @@ export function DecisionList({ items, onOpen, currency }: { items: DecisionSumma
             </span>
             <span className="sx-row-num">
               {money(d.evContributionMinor, currency)}
-              <small>{d.pGoal !== null ? `P(goal) ${pct(d.pGoal)}` : ""}</small>
+              <small>{d.pGoal !== null ? `${pct(d.pGoal)} chance of goal` : ""}</small>
             </span>
             <Chip tone={stateTone(d.state)}>{STATE_LABEL[d.state]}</Chip>
           </button>
@@ -269,6 +273,7 @@ export function GoalsPage({ onExplain }: { onExplain(k: KpiCard): void }) {
   const { data, error } = useGet<{ objectives: Objective[]; kpis: KpiCard[] }>("/objectives");
   const { me } = useEnt();
   const [panel, setPanel] = useState<"goal" | "import" | null>(null);
+  const [setup, setSetup] = useState<string | null>(null);
   if (error) return <ErrorLine error={error} />;
   if (!data) return <div className="sx-loading">Loading…</div>;
   return (
@@ -299,7 +304,12 @@ export function GoalsPage({ onExplain }: { onExplain(k: KpiCard): void }) {
               <div className="sx-goal-head">
                 <h3>{k.name}</h3>
                 <div className="sx-goal-chips">
-                  <Chip tone={k.status === "active" ? "good" : "warn"}>{k.status === "active" ? "steering rankings" : `draft — needs ${o.missing.join(", ")}`}</Chip>
+                  <Chip tone={k.status === "active" ? "good" : "warn"}>{k.status === "active" ? "steering rankings" : `draft — needs ${o.missing.map((m) => MISSING_TEXT[m]?.replace(/ \(.*\)$/, "") ?? m).join(", ")}`}</Chip>
+                  {me.role === "admin" && (
+                    <Btn variant={k.status === "draft" ? "primary" : "quiet"} onClick={() => setSetup(o.id)}>
+                      {k.status === "draft" ? "Set up goal" : "Edit goal"}
+                    </Btn>
+                  )}
                   <Chip tone={freshTone(k)}>{freshLabel(k)}</Chip>
                 </div>
               </div>
@@ -307,7 +317,7 @@ export function GoalsPage({ onExplain }: { onExplain(k: KpiCard): void }) {
                 <Figure label="Baseline" value={metricValue(k.baseline?.value ?? null, k.unit, k.currency, true)} sub={k.baseline?.label ?? "not set"} onExplain={() => onExplain(k)} />
                 <Figure label="Target" value={metricValue(k.target.value, k.unit, k.currency, true)} sub={`by ${date(k.target.deadline)}`} onExplain={() => onExplain(k)} />
                 <Figure label="Actual" value={metricValue(k.actual, k.unit, k.currency, true)} sub={k.unit === "money" ? "trailing 13 weeks" : "latest week"} onExplain={() => onExplain(k)} />
-                <Figure label="Forecast" value={metricValue(k.forecast?.value ?? null, k.unit, k.currency, true)} sub={k.forecast ? `P(hit) ${pct(k.forecast.pHit)}` : "insufficient data"} onExplain={() => onExplain(k)} />
+                <Figure label="Forecast" value={metricValue(k.forecast?.value ?? null, k.unit, k.currency, true)} sub={k.forecast ? `${pct(k.forecast.pHit)} chance of hitting target` : "insufficient data"} onExplain={() => onExplain(k)} />
                 <Figure label="Source" value={<span className="sx-fig-text">{k.source}</span>} sub={`${k.metricName} v${k.metricVersion} · owner ${k.ownerName ?? "—"}`} onExplain={() => onExplain(k)} />
               </div>
               {k.series.length > 1 ? (
@@ -332,6 +342,7 @@ export function GoalsPage({ onExplain }: { onExplain(k: KpiCard): void }) {
       </div>
       {panel === "goal" && <NewGoalPanel onClose={() => setPanel(null)} />}
       {panel === "import" && <ImportPanel onClose={() => setPanel(null)} />}
+      {setup && data.objectives.find((o) => o.id === setup) && <GoalSetupPanel objective={data.objectives.find((o) => o.id === setup)!} kpi={data.kpis.find((k) => k.objectiveId === setup)!} onClose={() => setSetup(null)} />}
     </>
   );
 }
@@ -420,25 +431,31 @@ function NewGoalPanel({ onClose }: { onClose(): void }) {
   );
 }
 
-const SAMPLE_CSV = `invoice_id,date,amount,currency,segment,plan
-INV-9001,${new Date().toISOString().slice(0, 10)},1840.00,USD,mid,annual
-INV-9002,${new Date().toISOString().slice(0, 10)},960.50,USD,smb,monthly
-INV-9002,${new Date().toISOString().slice(0, 10)},960.50,USD,smb,monthly
-INV-9003,,410.00,USD,smb,monthly
-INV-9004,${new Date().toISOString().slice(0, 10)},1200.00,EUR,ent,annual`;
+/** An example file showing the preview catching a duplicate, a missing date and a foreign currency. */
+function exampleCsv(currency: string): string {
+  const d = new Date().toISOString().slice(0, 10);
+  const other = currency === "USD" ? "EUR" : "USD";
+  return `invoice_id,date,amount,currency,segment,plan
+INV-0001,${d},1840.00,${currency},large,annual
+INV-0002,${d},960.50,${currency},small,monthly
+INV-0002,${d},960.50,${currency},small,monthly
+INV-0003,,410.00,${currency},small,monthly
+INV-0004,${d},1200.00,${other},large,annual`;
+}
 
 function ImportPanel({ onClose }: { onClose(): void }) {
-  const { call } = useEnt();
+  const { call, currency } = useEnt();
   const { busy, error, run } = useAction();
-  const [csv, setCsv] = useState(SAMPLE_CSV);
+  const [csv, setCsv] = useState(() => exampleCsv(currency));
   const [map, setMap] = useState({ externalId: "invoice_id", occurredAt: "date", amount: "amount", currency: "currency", segment: "segment", plan: "plan" });
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [done, setDone] = useState<number | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const body = (dryRun: boolean) => ({
     csv,
     dryRun,
-    source: "upload.csv",
-    mapping: { externalId: map.externalId, occurredAt: map.occurredAt, amount: map.amount, ...(map.currency ? { currency: map.currency } : {}), defaultCurrency: "USD", extra: { ...(map.segment ? { segment: map.segment } : {}), ...(map.plan ? { plan: map.plan } : {}), stage: "" } },
+    source: fileName ?? "upload.csv",
+    mapping: { externalId: map.externalId, occurredAt: map.occurredAt, amount: map.amount, ...(map.currency ? { currency: map.currency } : {}), defaultCurrency: currency, extra: { ...(map.segment ? { segment: map.segment } : {}), ...(map.plan ? { plan: map.plan } : {}), stage: "" } },
   });
   // "stage" is fixed to paid for billing exports: add it as a constant column.
   const withStage = (b: ReturnType<typeof body>) => {
@@ -458,7 +475,10 @@ function ImportPanel({ onClose }: { onClose(): void }) {
           aria-label="CSV file"
           onChange={async (e) => {
             const file = e.target.files?.[0];
-            if (file) setCsv(await file.text());
+            if (file) {
+              setCsv(await file.text());
+              setFileName(file.name.slice(0, 120));
+            }
           }}
         />
         <div className="sx-form-row sx-form-row-3">
@@ -557,7 +577,7 @@ export function DecisionsPage({ onOpen }: { onOpen: Open }) {
                   <span className="sx-muted">{d.objectiveName}</span>
                   <span className="sx-card-figs">
                     <span>{money(d.evContributionMinor, currency)}</span>
-                    <span>{d.pGoal !== null ? `P(goal) ${pct(d.pGoal)}` : "—"}</span>
+                    <span>{d.pGoal !== null ? `${pct(d.pGoal)} chance of goal` : "—"}</span>
                   </span>
                   {d.closeCall && <Chip tone="warn">close call</Chip>}
                   <span className="sx-muted">
@@ -606,7 +626,11 @@ interface CandidateDraft {
 const blankCandidate = (): CandidateDraft => ({ name: "", hypothesis: "", spend: "", cost: "", p: ["25", "50", "25"], inc: ["", "", ""], moat: "", moatP: "", moatValue: "" });
 
 function NewDecisionPanel({ onClose, onCreated }: { onClose(): void; onCreated(id: string): void }) {
-  const { call } = useEnt();
+  const { call, currency } = useEnt();
+  const me = useGet<{ profile: TodayView["profile"] }>("/me");
+  const unit = 10 ** minorDigits(currency);
+  const template = templateFor(me.data?.profile.businessModel ?? "subscription");
+  const [cohort, setCohort] = useState("100");
   const objectives = useGet<{ objectives: Objective[] }>("/objectives");
   const { busy, error, run } = useAction();
   const [title, setTitle] = useState("");
@@ -614,26 +638,26 @@ function NewDecisionPanel({ onClose, onCreated }: { onClose(): void; onCreated(i
   const [objectiveId, setObjectiveId] = useState("");
   const [cands, setCands] = useState<CandidateDraft[]>([blankCandidate()]);
   const useTemplate = () => {
-    const asOf = new Date().toISOString();
-    const toDraft = (a: ReturnType<typeof leadFollowUpAlternative>): CandidateDraft => ({
+    const alts = exampleAlternatives(template, new Date().toISOString(), Math.log10(unit)).filter((a) => !a.isBaseline);
+    const toDraft = (a: AlternativeInput): CandidateDraft => ({
       name: a.name,
       hypothesis: a.hypothesis ?? "",
-      spend: String(a.spendMinor / 100),
-      cost: String((a.scenarios[0].actionCostMinor ?? 0) / 100),
-      p: a.scenarios.map((s) => String((s.probability ?? 0) * 100)) as [string, string, string],
-      inc: a.scenarios.map((s) => String((s.revenueMinor! - baselineAlternative(asOf).scenarios[0].revenueMinor!) / 100)) as [string, string, string],
+      spend: String(a.spendMinor / unit),
+      cost: String((a.scenarios[0].actionCostMinor ?? 0) / unit),
+      p: a.scenarios.map((s) => String(Math.round((s.probability ?? 0) * 100))) as [string, string, string],
+      inc: a.scenarios.map((s) => String((s.revenueMinor ?? 0) / unit)) as [string, string, string],
       moat: a.moat?.mechanism ?? "",
-      moatP: a.moat ? String(a.moat.pCreatedRetained * 100) : "",
-      moatValue: a.moat ? String(a.moat.conditionalValueMinor / 100) : "",
+      moatP: a.moat ? String(Math.round(a.moat.pCreatedRetained * 100)) : "",
+      moatValue: a.moat ? String(a.moat.conditionalValueMinor / unit) : "",
     });
-    setTitle("Lift trial-to-paid conversion (pilot 2)");
-    setHyp("Faster human follow-up converts more inbound trials.");
-    setCands([toDraft(leadFollowUpAlternative(asOf)), toDraft(annualPlanAlternative(asOf))]);
+    setTitle(`${template.objectiveName}: compare options`);
+    setHyp(alts[0].hypothesis ?? "");
+    setCands(alts.slice(0, 2).map(toDraft));
   };
   const upd = (i: number, patch: Partial<CandidateDraft>) => setCands(cands.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const submit = async () => {
     const asOf = new Date().toISOString();
-    const base = baselineAlternative(asOf);
+    const base = exampleAlternatives(template, asOf, Math.log10(unit), [])[0];
     const labels = ["Downside", "Base", "Upside"];
     const alternatives = [
       base,
@@ -642,24 +666,24 @@ function NewDecisionPanel({ onClose, onCreated }: { onClose(): void; onCreated(i
         name: c.name || `Option ${i + 1}`,
         isBaseline: false,
         hypothesis: c.hypothesis,
-        spendMinor: Math.round(Number(c.spend || 0) * 100),
+        spendMinor: Math.round(Number(c.spend || 0) * unit),
         timeToEffectDays: 21,
         assumptions: [
           { key: "probabilities", label: "Scenario probabilities", value: c.p.join(" / "), provenance: { source: "decision author", asOf, origin: "estimated" as const } },
           { key: "lift", label: "Incremental revenue", value: c.inc.join(" / "), provenance: { source: "decision author", asOf, origin: "estimated" as const } },
         ],
-        ...(c.moat && c.moatP && c.moatValue ? { moat: { mechanism: c.moat, pCreatedRetained: Number(c.moatP) / 100, conditionalValueMinor: Math.round(Number(c.moatValue) * 100), horizonMonths: 12 } } : {}),
+        ...(c.moat && c.moatP && c.moatValue ? { moat: { mechanism: c.moat, pCreatedRetained: Number(c.moatP) / 100, conditionalValueMinor: Math.round(Number(c.moatValue) * unit), horizonMonths: 12 } } : {}),
         scenarios: base.scenarios.map((s, k) => ({
           key: s.key,
           label: labels[k],
           probability: c.p[k] === "" ? null : Number(c.p[k]) / 100,
-          revenueMinor: c.inc[k] === "" ? null : s.revenueMinor! + Math.round(Number(c.inc[k]) * 100),
-          actionCostMinor: c.cost === "" ? null : Math.round(Number(c.cost) * 100),
+          revenueMinor: c.inc[k] === "" ? null : s.revenueMinor! + Math.round(Number(c.inc[k]) * unit),
+          actionCostMinor: c.cost === "" ? null : Math.round(Number(c.cost) * unit),
         })),
       })),
     ];
     await run(async () => {
-      const r = await call<{ decision: { id: string } }>("POST", "/decisions", { objectiveId, title, hypothesis: hyp, horizonDays: 90, cohortSize: 420, alternatives });
+      const r = await call<{ decision: { id: string } }>("POST", "/decisions", { objectiveId, title, hypothesis: hyp, horizonDays: 90, cohortSize: Math.max(0, Math.round(Number(cohort) || 0)), alternatives });
       await call("POST", `/decisions/${r.decision.id}/evaluations`, {});
       onCreated(r.decision.id);
     });
@@ -669,7 +693,7 @@ function NewDecisionPanel({ onClose, onCreated }: { onClose(): void; onCreated(i
       <div className="sx-form">
         <div className="dp-actions">
           <Btn variant="quiet" onClick={useTemplate}>
-            Start from the revenue template
+            Start from the {template.label.toLowerCase()} template
           </Btn>
         </div>
         <Field label="Title">
@@ -677,6 +701,9 @@ function NewDecisionPanel({ onClose, onCreated }: { onClose(): void; onCreated(i
         </Field>
         <Field label="Hypothesis">
           <textarea rows={2} value={hyp} onChange={(e) => setHyp(e.target.value)} />
+        </Field>
+        <Field label="Accounts in the treated cohort">
+          <input type="number" min={0} value={cohort} onChange={(e) => setCohort(e.target.value)} />
         </Field>
         <Field label="Goal">
           <select value={objectiveId} onChange={(e) => setObjectiveId(e.target.value)}>
@@ -1047,7 +1074,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
             <div className="sx-grid sx-figs sx-figs-4">
               <Figure label="Measured incremental" value={money(o.measurement.incrementalTotalMinor, cur, { signed: true })} sub={`${o.measurement.treatedN} treated vs ${o.measurement.comparisonN} comparison`} />
               <Figure label="Lift per account" value={money(o.measurement.liftPerUnitMinor, cur, { signed: true })} sub={o.measurement.ci95 ? `95% CI ${money(o.measurement.ci95.lowMinor, cur)} … ${money(o.measurement.ci95.highMinor, cur)}` : "no interval"} />
-              <Figure label="Predicted (EV)" value={money(o.predicted.evRevenueMinor, cur)} sub={`P(goal) ${pct(o.predicted.pGoal)} · goal ${o.goalMet ? "met" : "missed"}`} />
+              <Figure label="Predicted" value={money(o.predicted.evRevenueMinor, cur)} sub={`${pct(o.predicted.pGoal)} chance of goal · goal ${o.goalMet ? "met" : "missed"}`} />
               <Figure label="Attribution" value={<span className="sx-fig-text">{o.measurement.attribution.replace("_", "-")}</span>} sub={o.measurement.confidenceLabel} />
             </div>
             <Facts
@@ -1072,7 +1099,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
 
       <div className="sx-cols sx-cols-even">
         <section className="sx-col">
-          <SectionHead index="5.3" title="Forecast calibration" />
+          <SectionHead index="5.3" title="How accurate past forecasts were" />
           {today.data && (
             <>
               <Calibration points={today.data.calibration.points} />
@@ -1083,7 +1110,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
           )}
         </section>
         <section className="sx-col sx-col-wide">
-          <SectionHead index="5.4" title="Durable assets" />
+          <SectionHead index="5.4" title="Lasting advantages" />
           <ul className="sx-rows">
             {(moats.data?.moats ?? []).map((m) => (
               <li key={m.id} className="sx-row sx-row-static">
@@ -1144,7 +1171,7 @@ function MoatAdvancePanel({ moat, currency, onClose }: { moat: MoatAsset; curren
           variant="primary"
           disabled={busy || !evidence || (next === "realized" && realized === "")}
           onClick={async () => {
-            if (await run(() => call("POST", `/moats/${moat.id}/advance`, { evidence, ...(next === "realized" ? { realizedMinor: Math.round(Number(realized) * 100) } : {}) }))) onClose();
+            if (await run(() => call("POST", `/moats/${moat.id}/advance`, { evidence, ...(next === "realized" ? { realizedMinor: Math.round(Number(realized) * 10 ** minorDigits(currency)) } : {}) }))) onClose();
           }}
         >
           Mark {next}
@@ -1154,24 +1181,25 @@ function MoatAdvancePanel({ moat, currency, onClose }: { moat: MoatAsset; curren
   );
 }
 
-function parseValues(text: string): number[] | null {
+function parseValues(text: string, unit: number): number[] | null {
   const xs = text
     .split(/[\s,;]+/)
     .filter(Boolean)
-    .map((x) => Math.round(Number(x) * 100));
+    .map((x) => Math.round(Number(x) * unit));
   return xs.length && xs.every(Number.isSafeInteger) ? xs : null;
 }
 
 function RegisterOutcomePanel({ decision, onClose }: { decision: DecisionSummary; onClose(): void }) {
-  const { call } = useEnt();
+  const { call, currency } = useEnt();
   const { busy, error, run } = useAction();
   const [method, setMethod] = useState<"random_holdout" | "matched_cohort" | "pre_post">("random_holdout");
   const [treated, setTreated] = useState("");
   const [comparison, setComparison] = useState("");
   const [start, setStart] = useState(new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10));
   const [end, setEnd] = useState(new Date().toISOString().slice(0, 10));
-  const t = parseValues(treated);
-  const c = parseValues(comparison);
+  const unit = 10 ** minorDigits(currency);
+  const t = parseValues(treated, unit);
+  const c = parseValues(comparison, unit);
   return (
     <SlidePanel title="Register outcome" kicker={decision.title} onClose={onClose}>
       <div className="sx-form">
@@ -1222,7 +1250,7 @@ function RegisterOutcomePanel({ decision, onClose }: { decision: DecisionSummary
 }
 
 function ReviewOutcomePanel({ outcome, onClose }: { outcome: Outcome; onClose(): void }) {
-  const { call } = useEnt();
+  const { call, currency } = useEnt();
   const { busy, error, run } = useAction();
   const [rationale, setRationale] = useState("");
   const [next, setNext] = useState<"expand" | "revise" | "stop">("expand");
@@ -1234,9 +1262,9 @@ function ReviewOutcomePanel({ outcome, onClose }: { outcome: Outcome; onClose():
     <SlidePanel title="Review outcome" kicker={outcome.measurement.confidenceLabel} onClose={onClose}>
       <Facts
         rows={[
-          ["Incremental", money(outcome.measurement.incrementalTotalMinor, "USD", { signed: true })],
-          ["Per account", money(outcome.measurement.liftPerUnitMinor, "USD", { signed: true })],
-          ["95% CI", outcome.measurement.ci95 ? `${money(outcome.measurement.ci95.lowMinor, "USD")} … ${money(outcome.measurement.ci95.highMinor, "USD")}` : "—"],
+          ["Incremental", money(outcome.measurement.incrementalTotalMinor, currency, { signed: true })],
+          ["Per account", money(outcome.measurement.liftPerUnitMinor, currency, { signed: true })],
+          ["95% CI", outcome.measurement.ci95 ? `${money(outcome.measurement.ci95.lowMinor, currency)} … ${money(outcome.measurement.ci95.highMinor, currency)}` : "—"],
           ["Metric version", String(outcome.metricVersion)],
           ["Source rows", String(outcome.sourceRowIds.length)],
         ]}
@@ -1275,7 +1303,7 @@ function ReviewOutcomePanel({ outcome, onClose }: { outcome: Outcome; onClose():
 // Settings
 // ===========================================================================
 
-export function SettingsPage({ onReset }: { onReset(): void }) {
+export function SettingsPage({ onReset, onNewWorkspace }: { onReset(): void; onNewWorkspace(): void }) {
   const me = useGet<{ me: Member; profile: TodayView["profile"]; policy: PolicyVersion; compass: string }>("/me");
   const members = useGet<{ members: Member[] }>("/members");
   const policy = useGet<{ policy: PolicyVersion; history: PolicyVersion[] }>("/policy");
@@ -1285,7 +1313,11 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
   const [draft, setDraft] = useState<{ maxLoss: string; maxSpend: string; maxDown: string; maxAge: string; finance: string } | null>(null);
   const p = policy.data?.policy;
   const cur = me.data?.profile.currency ?? "USD";
-  const d = draft ?? (p ? { maxLoss: String(p.evaluation.maxLossProbability * 100), maxSpend: String(p.evaluation.maxSpendMinor / 100), maxDown: String(p.evaluation.maxDownsideExposureMinor / 100), maxAge: String(p.evaluation.maxInputAgeDays), finance: String(p.financeApprovalOverMinor / 100) } : null);
+  const unit = 10 ** minorDigits(cur);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [editProfile, setEditProfile] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const d = draft ?? (p ? { maxLoss: String(p.evaluation.maxLossProbability * 100), maxSpend: String(p.evaluation.maxSpendMinor / unit), maxDown: String(p.evaluation.maxDownsideExposureMinor / unit), maxAge: String(p.evaluation.maxInputAgeDays), finance: String(p.financeApprovalOverMinor / unit) } : null);
   const exportAudit = () => {
     const blob = new Blob([JSON.stringify(audit.data?.events ?? [], null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -1324,9 +1356,26 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
             ]}
           />
           <div className="dp-actions">
-            <Btn variant="quiet" onClick={onReset}>
-              Reset demo data
-            </Btn>
+            {ident.role === "admin" && <Btn onClick={() => setEditProfile(true)}>Edit profile</Btn>}
+            <Btn onClick={onNewWorkspace}>Create another workspace</Btn>
+          </div>
+          <SectionHead index="6.6" title="Local data" />
+          <p className="sx-note">Workspaces live on this device. Resetting deletes every workspace here and returns to setup.</p>
+          <div className="dp-actions">
+            {!confirmReset ? (
+              <Btn variant="danger" onClick={() => setConfirmReset(true)}>
+                Reset local data
+              </Btn>
+            ) : (
+              <>
+                <Btn variant="danger" onClick={onReset}>
+                  Delete all workspaces
+                </Btn>
+                <Btn variant="quiet" onClick={() => setConfirmReset(false)}>
+                  Keep them
+                </Btn>
+              </>
+            )}
           </div>
         </section>
         <section className="sx-col sx-col-wide">
@@ -1334,7 +1383,7 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
           {d && (
             <div className="sx-form">
               <div className="sx-form-row sx-form-row-3">
-                <Field label="Max P(loss) %">
+                <Field label="Highest acceptable chance of losing money (%)">
                   <input type="number" disabled={ident.role !== "admin"} value={d.maxLoss} onChange={(e) => setDraft({ ...d, maxLoss: e.target.value })} />
                 </Field>
                 <Field label={`Max spend per action (${cur})`}>
@@ -1359,10 +1408,10 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
                       await run(() =>
                         call("POST", "/policy", {
                           maxLossProbability: Number(d.maxLoss) / 100,
-                          maxSpendMinor: Math.round(Number(d.maxSpend) * 100),
-                          maxDownsideExposureMinor: Math.round(Number(d.maxDown) * 100),
+                          maxSpendMinor: Math.round(Number(d.maxSpend) * unit),
+                          maxDownsideExposureMinor: Math.round(Number(d.maxDown) * unit),
                           maxInputAgeDays: Math.round(Number(d.maxAge)),
-                          financeApprovalOverMinor: Math.round(Number(d.finance) * 100),
+                          financeApprovalOverMinor: Math.round(Number(d.finance) * unit),
                         }),
                       )
                     )
@@ -1375,7 +1424,7 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
               <ErrorLine error={error} />
             </div>
           )}
-          <SectionHead index="6.4" title="Members" />
+          <SectionHead index="6.4" title="Members" aside={ident.role === "admin" ? <Btn variant="quiet" onClick={() => setAdding(true)}>Add member</Btn> : null} />
           <div className="sx-table-wrap">
             <table className="sx-table sx-table-tight">
               <thead>
@@ -1435,6 +1484,176 @@ export function SettingsPage({ onReset }: { onReset(): void }) {
           )}
         </section>
       </div>
+      {adding && <AddMemberPanel onClose={() => setAdding(false)} departments={me.data?.profile.departments ?? []} />}
+      {editProfile && me.data && <ProfilePanel profile={me.data.profile} onClose={() => setEditProfile(false)} />}
     </>
+  );
+}
+
+const ROLES: Member["role"][] = ["executive", "lead", "operator", "finance", "auditor", "admin"];
+
+function AddMemberPanel({ onClose, departments }: { onClose(): void; departments: string[] }) {
+  const { call } = useEnt();
+  const { busy, error, run } = useAction();
+  const [f, setF] = useState({ name: "", title: "", role: "lead" as Member["role"], department: departments[0] ?? "" });
+  return (
+    <SlidePanel title="Add member" kicker="Roles decide what someone can do: decide, approve, submit evidence, review or audit." onClose={onClose}>
+      <div className="sx-form">
+        <Field label="Name">
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="Title">
+          <input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
+        </Field>
+        <Field label="Role">
+          <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Member["role"] })}>
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {roleLabel(r)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Department">
+          <input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} list="depts" />
+          <datalist id="depts">
+            {departments.map((d) => (
+              <option key={d} value={d} />
+            ))}
+          </datalist>
+        </Field>
+        <ErrorLine error={error} />
+        <Btn
+          variant="primary"
+          disabled={busy || !f.name.trim()}
+          onClick={async () => {
+            if (await run(() => call("POST", "/members", f))) onClose();
+          }}
+        >
+          Add member
+        </Btn>
+      </div>
+    </SlidePanel>
+  );
+}
+
+function ProfilePanel({ profile, onClose }: { profile: TodayView["profile"]; onClose(): void }) {
+  const { call } = useEnt();
+  const { busy, error, run } = useAction();
+  const [f, setF] = useState({ name: profile.name, timezone: profile.timezone, fiscalYearStartMonth: profile.fiscalYearStartMonth, margin: profile.grossMarginBps === null ? "" : String(profile.grossMarginBps / 100), aiDataPolicy: profile.aiDataPolicy, departments: profile.departments.join(", ") });
+  return (
+    <SlidePanel title="Company profile" kicker={`Version ${profile.version} · saving creates version ${profile.version + 1}, applied from now on. Currency is fixed for this workspace.`} onClose={onClose}>
+      <div className="sx-form">
+        <Field label="Company name">
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="Timezone">
+          <input value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} />
+        </Field>
+        <Field label="Fiscal year starts (month 1–12)">
+          <input type="number" min={1} max={12} value={f.fiscalYearStartMonth} onChange={(e) => setF({ ...f, fiscalYearStartMonth: Number(e.target.value) })} />
+        </Field>
+        <Field label="Gross margin %" hint="Used to derive contribution when an option gives none.">
+          <input type="number" min={0} max={100} value={f.margin} onChange={(e) => setF({ ...f, margin: e.target.value })} />
+        </Field>
+        <Field label="Data that may reach AI services">
+          <select value={f.aiDataPolicy} onChange={(e) => setF({ ...f, aiDataPolicy: e.target.value as typeof f.aiDataPolicy })}>
+            <option value="none">None</option>
+            <option value="aggregates_only">Aggregates only</option>
+            <option value="redacted_records">Redacted records</option>
+          </select>
+        </Field>
+        <Field label="Departments" hint="Comma-separated.">
+          <input value={f.departments} onChange={(e) => setF({ ...f, departments: e.target.value })} />
+        </Field>
+        <ErrorLine error={error} />
+        <Btn
+          variant="primary"
+          disabled={busy || !f.name.trim()}
+          onClick={async () => {
+            const ok = await run(() =>
+              call("POST", "/profile", {
+                name: f.name.trim(),
+                timezone: f.timezone.trim(),
+                fiscalYearStartMonth: f.fiscalYearStartMonth,
+                grossMarginBps: f.margin === "" ? null : Math.round(Number(f.margin) * 100),
+                aiDataPolicy: f.aiDataPolicy,
+                departments: f.departments.split(",").map((x) => x.trim()).filter(Boolean),
+              }),
+            );
+            if (ok) onClose();
+          }}
+        >
+          Save as version {profile.version + 1}
+        </Btn>
+      </div>
+    </SlidePanel>
+  );
+}
+
+const MISSING_TEXT: Record<string, string> = { owner: "an owner", source: "a data source (import a CSV)", baselinePeriod: "a baseline period", deadline: "a target date", target: "a target" };
+
+function GoalSetupPanel({ objective, kpi, onClose }: { objective: Objective; kpi: KpiCard; onClose(): void }) {
+  const { call } = useEnt();
+  const members = useGet<{ members: Member[] }>("/members");
+  const { busy, error, run } = useAction();
+  const unit = kpi.unit === "money" ? 10 ** minorDigits(kpi.currency) : kpi.unit === "ratio" ? 0.01 : 1;
+  const [target, setTarget] = useState(objective.targetValue ? String(objective.targetValue / unit) : "");
+  const [deadline, setDeadline] = useState(objective.deadline?.slice(0, 10) ?? "");
+  const [owner, setOwner] = useState(objective.ownerId ?? "");
+  const [weeks, setWeeks] = useState("13");
+  const [useData, setUseData] = useState(!objective.baseline);
+  return (
+    <SlidePanel title="Set up goal" kicker={objective.name} onClose={onClose}>
+      {objective.missing.length > 0 && (
+        <ul className="sx-bullets">
+          {objective.missing.map((m) => (
+            <li key={m}>Needs {MISSING_TEXT[m] ?? m}</li>
+          ))}
+        </ul>
+      )}
+      <div className="sx-form">
+        <Field label={`Target ${kpi.unit === "money" ? `(${kpi.currency})` : kpi.unit === "ratio" ? "(%)" : ""}`}>
+          <input type="number" value={target} onChange={(e) => setTarget(e.target.value)} />
+        </Field>
+        <Field label="Target date">
+          <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+        </Field>
+        <Field label="Owner">
+          <select value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <option value="">Unassigned</option>
+            {members.data?.members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} — {roleLabel(m.role)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <label className="dp-choice">
+          <input type="checkbox" checked={useData} onChange={(e) => setUseData(e.target.checked)} />
+          <span>Set the baseline from imported data over the last</span>
+          <input type="number" min={1} max={104} value={weeks} onChange={(e) => setWeeks(e.target.value)} style={{ width: 64 }} aria-label="Baseline weeks" />
+          <span>weeks</span>
+        </label>
+        <ErrorLine error={error} />
+        <Btn
+          variant="primary"
+          disabled={busy}
+          onClick={async () => {
+            const ok = await run(() =>
+              call("POST", `/objectives/${objective.id}`, {
+                ...(target !== "" ? { targetValue: Number(target) * unit } : {}),
+                ...(deadline ? { deadline } : {}),
+                ownerId: owner || null,
+                ...(useData ? { baselineFromData: { weeks: Math.max(1, Math.min(104, Math.round(Number(weeks) || 13))) } } : {}),
+              }),
+            );
+            if (ok) onClose();
+          }}
+        >
+          Save goal
+        </Btn>
+      </div>
+    </SlidePanel>
   );
 }
