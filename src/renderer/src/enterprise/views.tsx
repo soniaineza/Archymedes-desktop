@@ -91,7 +91,7 @@ export function TodayPage({ onOpen, onExplain }: { onOpen: Open; onExplain(k: Kp
                 Forecast <b>{metricValue(k.forecast?.value ?? null, k.unit, cur, true)}</b>
               </span>
               <span>
-                P(hit) <b>{pct(k.forecast?.pHit ?? null)}</b>
+                Chance of hitting <b>{pct(k.forecast?.pHit ?? null)}</b>
               </span>
             </footer>
           </article>
@@ -144,12 +144,12 @@ export function TodayPage({ onOpen, onExplain }: { onOpen: Open; onExplain(k: Kp
               <Empty>No blockers.</Empty>
             )}
           </section>
-          <SectionHead index="1.5" title="Orion calibration" />
+          <SectionHead index="1.5" title="Forecast accuracy" />
           <div className="sx-grid sx-grid-2">
-            <Figure label="Brier score" value={data.calibration.score === null ? "—" : data.calibration.score.toFixed(3)} sub={`n = ${data.calibration.n} · lower is better`} />
-            <Figure label="Skill vs base rate" value={data.calibration.skill === null ? "—" : `${data.calibration.skill >= 0 ? "+" : ""}${(data.calibration.skill * 100).toFixed(0)}%`} sub={`base rate ${data.calibration.baseline?.toFixed(3) ?? "—"}`} />
+            <Figure label="Past forecast error" value={data.calibration.score === null ? "—" : data.calibration.score.toFixed(3)} sub={`n = ${data.calibration.n} · lower is better`} />
+            <Figure label="Better than guessing by" value={data.calibration.skill === null ? "—" : `${data.calibration.skill >= 0 ? "+" : ""}${(data.calibration.skill * 100).toFixed(0)}%`} sub={`base rate ${data.calibration.baseline?.toFixed(3) ?? "—"}`} />
           </div>
-          <SectionHead index="1.6" title="Defensibility" />
+          <SectionHead index="1.6" title="Lasting advantages" />
           <StageBar
             currency={cur}
             parts={[
@@ -179,7 +179,7 @@ export function DecisionList({ items, onOpen, currency }: { items: DecisionSumma
             </span>
             <span className="sx-row-num">
               {money(d.evContributionMinor, currency)}
-              <small>{d.pGoal !== null ? `P(goal) ${pct(d.pGoal)}` : ""}</small>
+              <small>{d.pGoal !== null ? `${pct(d.pGoal)} chance of goal` : ""}</small>
             </span>
             <Chip tone={stateTone(d.state)}>{STATE_LABEL[d.state]}</Chip>
           </button>
@@ -317,7 +317,7 @@ export function GoalsPage({ onExplain }: { onExplain(k: KpiCard): void }) {
                 <Figure label="Baseline" value={metricValue(k.baseline?.value ?? null, k.unit, k.currency, true)} sub={k.baseline?.label ?? "not set"} onExplain={() => onExplain(k)} />
                 <Figure label="Target" value={metricValue(k.target.value, k.unit, k.currency, true)} sub={`by ${date(k.target.deadline)}`} onExplain={() => onExplain(k)} />
                 <Figure label="Actual" value={metricValue(k.actual, k.unit, k.currency, true)} sub={k.unit === "money" ? "trailing 13 weeks" : "latest week"} onExplain={() => onExplain(k)} />
-                <Figure label="Forecast" value={metricValue(k.forecast?.value ?? null, k.unit, k.currency, true)} sub={k.forecast ? `P(hit) ${pct(k.forecast.pHit)}` : "insufficient data"} onExplain={() => onExplain(k)} />
+                <Figure label="Forecast" value={metricValue(k.forecast?.value ?? null, k.unit, k.currency, true)} sub={k.forecast ? `${pct(k.forecast.pHit)} chance of hitting target` : "insufficient data"} onExplain={() => onExplain(k)} />
                 <Figure label="Source" value={<span className="sx-fig-text">{k.source}</span>} sub={`${k.metricName} v${k.metricVersion} · owner ${k.ownerName ?? "—"}`} onExplain={() => onExplain(k)} />
               </div>
               {k.series.length > 1 ? (
@@ -577,7 +577,7 @@ export function DecisionsPage({ onOpen }: { onOpen: Open }) {
                   <span className="sx-muted">{d.objectiveName}</span>
                   <span className="sx-card-figs">
                     <span>{money(d.evContributionMinor, currency)}</span>
-                    <span>{d.pGoal !== null ? `P(goal) ${pct(d.pGoal)}` : "—"}</span>
+                    <span>{d.pGoal !== null ? `${pct(d.pGoal)} chance of goal` : "—"}</span>
                   </span>
                   {d.closeCall && <Chip tone="warn">close call</Chip>}
                   <span className="sx-muted">
@@ -1074,7 +1074,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
             <div className="sx-grid sx-figs sx-figs-4">
               <Figure label="Measured incremental" value={money(o.measurement.incrementalTotalMinor, cur, { signed: true })} sub={`${o.measurement.treatedN} treated vs ${o.measurement.comparisonN} comparison`} />
               <Figure label="Lift per account" value={money(o.measurement.liftPerUnitMinor, cur, { signed: true })} sub={o.measurement.ci95 ? `95% CI ${money(o.measurement.ci95.lowMinor, cur)} … ${money(o.measurement.ci95.highMinor, cur)}` : "no interval"} />
-              <Figure label="Predicted (EV)" value={money(o.predicted.evRevenueMinor, cur)} sub={`P(goal) ${pct(o.predicted.pGoal)} · goal ${o.goalMet ? "met" : "missed"}`} />
+              <Figure label="Predicted" value={money(o.predicted.evRevenueMinor, cur)} sub={`${pct(o.predicted.pGoal)} chance of goal · goal ${o.goalMet ? "met" : "missed"}`} />
               <Figure label="Attribution" value={<span className="sx-fig-text">{o.measurement.attribution.replace("_", "-")}</span>} sub={o.measurement.confidenceLabel} />
             </div>
             <Facts
@@ -1099,7 +1099,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
 
       <div className="sx-cols sx-cols-even">
         <section className="sx-col">
-          <SectionHead index="5.3" title="Forecast calibration" />
+          <SectionHead index="5.3" title="How accurate past forecasts were" />
           {today.data && (
             <>
               <Calibration points={today.data.calibration.points} />
@@ -1110,7 +1110,7 @@ export function OutcomesPage({ onOpen }: { onOpen: Open }) {
           )}
         </section>
         <section className="sx-col sx-col-wide">
-          <SectionHead index="5.4" title="Durable assets" />
+          <SectionHead index="5.4" title="Lasting advantages" />
           <ul className="sx-rows">
             {(moats.data?.moats ?? []).map((m) => (
               <li key={m.id} className="sx-row sx-row-static">
@@ -1383,7 +1383,7 @@ export function SettingsPage({ onReset, onNewWorkspace }: { onReset(): void; onN
           {d && (
             <div className="sx-form">
               <div className="sx-form-row sx-form-row-3">
-                <Field label="Max P(loss) %">
+                <Field label="Highest acceptable chance of losing money (%)">
                   <input type="number" disabled={ident.role !== "admin"} value={d.maxLoss} onChange={(e) => setDraft({ ...d, maxLoss: e.target.value })} />
                 </Field>
                 <Field label={`Max spend per action (${cur})`}>

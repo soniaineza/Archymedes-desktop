@@ -8,6 +8,8 @@ import { LifecycleRail, Meter, RangeStrip, ScenarioChart, Tornado } from "./viz"
 
 const DECIDE = ["lead", "executive", "admin"];
 
+const GATE_LABEL: Record<string, string> = { max_spend: "Over budget", max_loss_probability: "Too likely to lose money", max_downside_exposure: "Worst case too large", data_freshness: "Data out of date" };
+
 type Confirm = { verdict: "approve" | "reject" | "request_evidence" } | null;
 
 export function DecisionPanel({ id, onClose }: { id: string; onClose(): void }) {
@@ -74,19 +76,19 @@ function DecisionBody({ detail }: { detail: DecisionDetail }) {
 
       {/* ---- headline figures ---- */}
       <div className="sx-grid sx-figs">
-        <Figure label={d.chosenAlternativeId ? "Chosen" : "Orion recommends"} value={chosen?.name ?? (result?.status === "needs_evidence" ? "Needs evidence" : result ? "No eligible option" : "Not evaluated")} size="s" />
-        <Figure label="Expected contribution" value={money(chosen?.evContributionMinor, currency)} sub={`${result?.horizonDays ?? d.horizonDays} days, after action cost`} size="l" />
-        <Figure label="Expected revenue" value={money(chosen?.evRevenueMinor, currency)} sub="incremental vs no change" />
-        <Figure label="P(goal)" value={pct(chosen?.pGoal ?? null)} sub={result?.goalLabel} />
-        <Figure label="P(loss)" value={pct(chosen?.pLoss ?? null)} sub={`limit ${pct(policy.evaluation.maxLossProbability)}`} />
-        <Figure label="Moat potential" value={money(chosen?.moatPotentialMinor ?? null, currency)} sub="kept separate from revenue" />
+        <Figure label={d.chosenAlternativeId ? "Chosen" : "Recommended"} value={chosen?.name ?? (result?.status === "needs_evidence" ? "Needs evidence" : result ? "No eligible option" : "Not evaluated")} size="s" />
+        <Figure label="Expected profit gain" value={money(chosen?.evContributionMinor, currency)} sub={`over ${result?.horizonDays ?? d.horizonDays} days, after its cost, vs doing nothing`} size="l" />
+        <Figure label="Expected revenue" value={money(chosen?.evRevenueMinor, currency)} sub="extra revenue vs doing nothing" />
+        <Figure label="Chance of hitting the goal" value={pct(chosen?.pGoal ?? null)} sub={result?.goalLabel} />
+        <Figure label="Chance of losing money" value={pct(chosen?.pLoss ?? null)} sub={`your limit is ${pct(policy.evaluation.maxLossProbability)}`} />
+        <Figure label="Lasting advantage" value={money(chosen?.moatPotentialMinor ?? null, currency)} sub="kept separate from the money figures" />
       </div>
 
       {/* ---- actions ---- */}
       <div className="dp-actions">
         {canDecide && ["Draft", "NeedsEvidence", "Evaluated"].includes(d.state) && (
           <Btn variant={d.state === "Evaluated" ? "ghost" : "primary"} disabled={busy} onClick={() => run(() => call("POST", `/decisions/${d.id}/evaluations`, {}))}>
-            {d.state === "Evaluated" ? "Re-run Orion" : "Evaluate in Orion"}
+            {d.state === "Evaluated" ? "Recalculate" : "Compare options"}
           </Btn>
         )}
         {detail.canEdit && !editing && (
@@ -149,8 +151,8 @@ function DecisionBody({ detail }: { detail: DecisionDetail }) {
               <label key={a.id} className={`dp-choice ${!a.eligible ? "is-gated" : ""}`}>
                 <input type="radio" name="choice" disabled={!a.eligible} checked={(choice ?? result.recommendationId) === a.id} onChange={() => setChoice(a.id)} />
                 <span>{a.name}</span>
-                {a.id === result.recommendationId && <Chip tone="accent">Orion pick</Chip>}
-                {!a.eligible && <Chip tone="bad">Gated</Chip>}
+                {a.id === result.recommendationId && <Chip tone="accent">Recommended</Chip>}
+                {!a.eligible && <Chip tone="bad">Fails a policy check</Chip>}
               </label>
             ))}
           </div>
@@ -166,20 +168,20 @@ function DecisionBody({ detail }: { detail: DecisionDetail }) {
       {/* ---- comparison ---- */}
       {result && result.status !== "failed" && (
         <>
-          <SectionHead index="A" title="Alternatives, side by side" aside={result.closeCall ? <Chip tone="warn">Close call</Chip> : null} />
+          <SectionHead index="A" title="The options, side by side" aside={result.closeCall ? <Chip tone="warn">Close call</Chip> : null} />
           <div className="sx-table-wrap">
             <table className="sx-table">
               <thead>
                 <tr>
                   <th>#</th>
                   <th>Alternative</th>
-                  <th className="num">E[contribution]</th>
-                  <th className="num">E[revenue]</th>
-                  <th>P(goal)</th>
-                  <th>P(loss)</th>
+                  <th className="num">Expected profit gain</th>
+                  <th className="num">Expected revenue</th>
+                  <th>Chance of hitting the goal</th>
+                  <th>Chance of losing money</th>
                   <th>Range</th>
-                  <th className="num">Moat</th>
-                  <th>Gates</th>
+                  <th className="num">Lasting advantage</th>
+                  <th>Policy checks</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,9 +192,9 @@ function DecisionBody({ detail }: { detail: DecisionDetail }) {
             </table>
           </div>
 
-          <SectionHead index="B" title="Scenarios — width is probability, height is Δ contribution" />
+          <SectionHead index="B" title="What could happen" />
           <ScenarioChart alternatives={result.alternatives} currency={currency} />
-          <p className="sx-note">The signed area of each set of columns equals its expected contribution. Baseline: no change, same window and currency.</p>
+          <p className="sx-note">Each column is one possible outcome: its width is how likely it is, its height is the profit gained (blue) or lost (red) compared with doing nothing. The line marks the expected profit gain, the likelihood-weighted average.</p>
 
           {top && result.sensitivities.length > 0 && (
             <>
@@ -316,12 +318,12 @@ function AltRow({ a, currency, lo, hi, limit, recommended }: { a: AlternativeRes
       <td>
         <b>{a.name}</b>
         {a.isBaseline && <span className="sx-muted"> · baseline</span>}
-        {recommended && !a.isBaseline && <Chip tone="accent">Orion pick</Chip>}
+        {recommended && !a.isBaseline && <Chip tone="accent">Recommended</Chip>}
       </td>
       <td className="num">{money(a.evContributionMinor, currency)}</td>
       <td className="num">{money(a.evRevenueMinor, currency)}</td>
-      <td>{a.pGoal !== null && !a.isBaseline ? <Meter value={a.pGoal} label="P(goal)" /> : "—"}</td>
-      <td>{a.pLoss !== null && !a.isBaseline ? <Meter value={a.pLoss} limit={limit} label="P(loss)" /> : "—"}</td>
+      <td>{a.pGoal !== null && !a.isBaseline ? <Meter value={a.pGoal} label="Chance of hitting the goal" /> : "—"}</td>
+      <td>{a.pLoss !== null && !a.isBaseline ? <Meter value={a.pLoss} limit={limit} label="Chance of losing money" /> : "—"}</td>
       <td>{a.range && !a.isBaseline ? <RangeStrip min={a.range.minMinor} max={a.range.maxMinor} ev={a.evContributionMinor!} lo={lo} hi={hi} currency={currency} /> : "—"}</td>
       <td className="num">{money(a.moatPotentialMinor, currency)}</td>
       <td>
@@ -329,14 +331,14 @@ function AltRow({ a, currency, lo, hi, limit, recommended }: { a: AlternativeRes
           {a.gates.length > 0 &&
             (a.gates.every((g) => g.passed) ? (
               <Chip tone="good" title={a.gates.map((g) => g.detail).join("\n")}>
-                {a.gates.length}/{a.gates.length} pass
+                all checks pass
               </Chip>
             ) : (
               a.gates
                 .filter((g) => !g.passed)
                 .map((g) => (
                   <Chip key={g.key} tone="bad" title={g.detail}>
-                    {g.key.replace(/_/g, " ")}
+                    {GATE_LABEL[g.key]}
                   </Chip>
                 ))
             ))}

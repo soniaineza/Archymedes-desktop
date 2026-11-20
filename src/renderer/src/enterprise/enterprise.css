@@ -182,7 +182,7 @@
 }
 .ent-top {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 24px;
   align-items: center;
   padding: 10px 32px;
@@ -1900,4 +1900,72 @@ button.sx-card:hover {
 .ob-actions {
   border-top: 2px solid var(--ink);
   padding-top: 18px;
+}
+
+/* ------------------------------------------------------------ guide */
+
+.ent-help {
+  border: 1px solid var(--hair-strong);
+  background: none;
+  padding: 7px 12px;
+  font: 600 12px/1 var(--text);
+  cursor: pointer;
+}
+.ent-help:hover {
+  border-color: var(--ink);
+}
+.hw {
+  margin: 0 0 40px;
+  animation: sx-rise 0.8s var(--ease) 0.26s both;
+}
+.hw-h {
+  font: 500 11px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  margin: 0 0 12px;
+}
+.hw-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--hair);
+}
+.hw-steps li {
+  background: var(--surface);
+  padding: 14px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.hw-steps b {
+  font: 650 17px/1.1 var(--display);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.hw-n {
+  font: 500 10.5px/1 var(--mono);
+  color: var(--accent-ink);
+}
+.hw-steps-col {
+  grid-template-columns: 1fr;
+  margin: 18px 0 8px;
+}
+.hw-glossary > div {
+  grid-template-columns: minmax(150px, 34%) 1fr;
+  line-height: 1.5;
+}
+.hw-glossary dt {
+  color: var(--ink);
+  font-weight: 600;
+}
+.hw-glossary dd {
+  color: var(--ink-2);
 }

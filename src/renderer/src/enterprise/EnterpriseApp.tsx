@@ -3,6 +3,7 @@ import type { BusinessProfile, KpiCard, SessionInfo } from "@shared/enterprise/a
 import { roleLabel, useEnt, useGet } from "./client";
 import { EntProvider } from "./EntProvider";
 import { Onboarding } from "./Onboarding";
+import { GuidePanel, HowItWorks } from "./Guide";
 import { DecisionPanel } from "./DecisionPanel";
 import { DecisionsPage, GoalsPage, OutcomesPage, ProvenancePanel, SettingsPage, TodayPage, WorkPage } from "./views";
 import "./enterprise.css";
@@ -91,6 +92,7 @@ function Welcome({ edition, onOpenWorkbench, children }: { edition: "desktop" | 
       </header>
       <main className="si-main">
         <p className="si-lede">Decide where to invest effort, act on the decision, and measure whether it improved the business.</p>
+        <HowItWorks />
         {children}
         <p className="si-note">
           {edition === "web"
@@ -147,6 +149,7 @@ function Shell({ onOpenWorkbench, onReset, onNewWorkspace, identities, onSwitch 
   const [openDecision, setOpenDecision] = useState<string | null>(null);
   const [explain, setExplain] = useState<KpiCard | null>(null);
   const [whoOpen, setWhoOpen] = useState(false);
+  const [guide, setGuide] = useState(false);
   const meInfo = useGet<{ profile: BusinessProfile; tenant: { name: string } }>("/me");
   useEffect(() => {
     if (meInfo.data) setCurrency(meInfo.data.profile.currency);
@@ -190,8 +193,11 @@ function Shell({ onOpenWorkbench, onReset, onNewWorkspace, identities, onSwitch 
             </span>
           </div>
           <div className="ent-top-orion">
-            <span className="ent-pulse" aria-hidden /> Orion · deterministic evaluator ready
+            <span className="ent-pulse" aria-hidden /> Decision engine ready
           </div>
+          <button type="button" className="ent-help" onClick={() => setGuide(true)}>
+            How it works
+          </button>
           <div className="ent-who">
             <button type="button" className="ent-who-btn" aria-haspopup="menu" aria-expanded={whoOpen} onClick={() => setWhoOpen((v) => !v)}>
               <span className="ent-avatar">{me.name.split(" ").map((x) => x[0]).join("")}</span>
@@ -232,6 +238,7 @@ function Shell({ onOpenWorkbench, onReset, onNewWorkspace, identities, onSwitch 
       </div>
       {openDecision && <DecisionPanel id={openDecision} onClose={() => setOpenDecision(null)} />}
       {explain && <ProvenancePanel kpi={explain} onClose={() => setExplain(null)} />}
+      {guide && <GuidePanel onClose={() => setGuide(false)} />}
     </div>
   );
 }
